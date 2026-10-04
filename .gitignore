@@ -1,0 +1,9 @@
+.env
+data/
+reports/*.pdf
+__pycache__/
+*.egg-info/
+.ipynb_checkpoints/
+.venv/
+.pytest_cache/
+.ruff_cache/

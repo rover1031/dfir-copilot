@@ -1,0 +1,26 @@
+source: web_access_meli
+description: Access logs HTTP de la API de facturación (CSV, 3 meses)
+format: csv
+
+# canónico: columna_en_el_origen
+fields:
+  timestamp: timestamp
+  src_ip: source_ip
+  http_method: http_method
+  host: http_host
+  uri: http_uri            # se divide en endpoint + query_string
+  status_code: http_staus  # el typo viene del origen
+  user_agent: http_user_agent
+  referer: http_referer
+
+timestamp:
+  format: "%Y-%d-%mT%H:%M"   # OJO: día antes que mes (confirmado)
+  timezone: "UTC"            # supuesto
+  timezone_verified: false   # origen desconocido; el manifiesto lo advertirá
+
+# Campos derivados por regex. Los x_ son específicos de esta fuente.
+derived:
+  x_invoice_id: { from: query_string, regex: 'invoice_id=([^&]+)', type: BIGINT }
+  x_site_id:    { from: query_string, regex: 'site_id=([^&]+)' }
+  x_token_type: { from: query_string, regex: 'authtoken=([A-Z]+)-ID-' }
+  user_id:      { from: query_string, regex: 'authtoken=(?:ATUSER|TEST)-ID-([^&]+)' }

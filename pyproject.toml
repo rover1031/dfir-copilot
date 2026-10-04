@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dfir-copilot"
+version = "0.1.0"
+description = "Framework agéntico de triage e investigación forense sobre logs"
+requires-python = ">=3.11"
+dependencies = [
+    "duckdb>=1.0",
+    "pyarrow>=15",
+    "pandas>=2.2",
+    "pyyaml>=6",
+    "pydantic>=2.6",
+    "typer>=0.12",
+]
+
+[project.optional-dependencies]
+notebook = ["jupyterlab>=4", "matplotlib", "plotly"]
+dev = ["pytest", "ruff"]
+pdf = ["pymupdf"]
+agent = ["langchain", "langgraph", "langchain-anthropic"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
