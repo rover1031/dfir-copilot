@@ -20,6 +20,7 @@ Tratamientos (columna -> qué ve el modelo):
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import ipaddress
 import json
@@ -138,6 +139,13 @@ def _ipv4_sql(col: str) -> tuple[str, str]:
     return scope_sql, net_sql
 
 
+def _quiet_progress(con) -> None:
+    """Desactiva la barra de progreso si se puede. Dentro de Jupyter, DuckDB rechaza incluso DESACTIVARLA cuando falta
+    `ipywidgets` ("Could not change the progress bar setting"): es cosmético, así que ese fallo se ignora."""
+    with contextlib.suppress(duckdb.Error):
+        con.execute("SET enable_progress_bar = false")
+
+
 def _width(n: int) -> int:
     return max(4, len(str(n)))
 
@@ -162,7 +170,7 @@ def build_pseudonymized(parquet: str | Path, manifest: dict, out_dir: str | Path
         con.execute("SET TimeZone = 'UTC'")
         con.execute(f"SET memory_limit = {_lit(memory_limit)}")
         con.execute("SET preserve_insertion_order = true")
-        con.execute("SET enable_progress_bar = false")
+        _quiet_progress(con)
         con.execute(f"CREATE VIEW src AS SELECT * FROM read_parquet({_lit(str(parquet))})")
         described = [(r[0], r[1]) for r in con.execute("DESCRIBE src").fetchall()]
         rows = manifest.get("output", {}).get("rows")

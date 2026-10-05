@@ -202,3 +202,27 @@ def test_la_clasificacion_en_sql_coincide_con_la_de_python():
                                            ("2800:3f0::1", "public"), ("192.0.2.10", "reserved"), ("010.1.2.3", "invalid")])
 def test_multicast_documentacion_y_ceros_a_la_izquierda(value, scope):
     assert ip_scope(value)[0] == scope
+
+
+def test_en_jupyter_sin_ipywidgets_la_barra_de_progreso_no_rompe_nada(real, tmp_path, monkeypatch):
+    """Caso real: en un notebook sin `ipywidgets`, DuckDB rechaza incluso `SET enable_progress_bar = false`."""
+    import dfir_copilot.privacy.pseudonymize as mod
+
+    real_connect = duckdb.connect
+
+    class JupyterLikeConnection:
+        def __init__(self, *a, **kw):
+            self._con = real_connect(*a, **kw)
+
+        def execute(self, sql, *args):
+            if "enable_progress_bar" in sql:
+                raise duckdb.InvalidInputException("Could not change the progress bar setting because: 'required package "
+                                                   "'ipywidgets' is missing, which is needed to render progress bars in Jupyter'")
+            return self._con.execute(sql, *args)
+
+        def __getattr__(self, name):
+            return getattr(self._con, name)
+
+    monkeypatch.setattr(mod.duckdb, "connect", JupyterLikeConnection)
+    m = build_pseudonymized(real["output"]["path"], real, tmp_path)
+    assert m["output"]["rows"] == real["output"]["rows"]
