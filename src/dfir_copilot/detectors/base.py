@@ -42,6 +42,7 @@ class DetectorRun:
 class Detector(ABC):
     name: str = ""
     description: str = ""
+    applies_to: tuple = ("web",)  # tipos de log (manifiesto `log_schema`; sin él, "web") sobre los que corre por defecto
 
     @abstractmethod
     def run(self, engine: QueryEngine) -> list[Finding]:
@@ -71,8 +72,9 @@ def register(cls: type[Detector]) -> type[Detector]:
     return cls
 
 
-def available() -> dict[str, str]:
-    return {name: cls.description for name, cls in _REGISTRY.items()}
+def available(kind: str | None = None) -> dict[str, str]:
+    """Detectores registrados; con `kind` (p. ej. "web" o "network"), solo los que aplican a ese tipo de log."""
+    return {name: cls.description for name, cls in _REGISTRY.items() if kind is None or kind in cls.applies_to}
 
 
 def run_detectors(
@@ -86,6 +88,7 @@ def run_detectors(
     from dfir_copilot.detectors.roles import detector_params
 
     params = params or {}
+    kind = (getattr(engine, "manifest", None) or {}).get("log_schema", "web")
     if roles is not None:
         role_params = detector_params(roles)
         params = {name: {**role_params.get(name, {}), **params.get(name, {})}
@@ -94,6 +97,8 @@ def run_detectors(
     for name, cls in _REGISTRY.items():
         if names and name not in names:
             continue
+        if not names and kind not in cls.applies_to:
+            continue  # sin nombres explícitos, solo los que aplican a este tipo de log (un log web no ejecuta detectores de red)
         start = len(engine.history)
         try:
             findings = cls(**params.get(name, {})).run(engine)

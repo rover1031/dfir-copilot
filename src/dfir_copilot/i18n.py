@@ -295,10 +295,10 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "en": "'{canonical}' could come from: {fields}. The draft uses '{chosen}'; confirm which one it is.",
     },
     "decision.unsupported_log_type": {
-        "es": "El archivo parece de tipo '{type}' y todavía no hay un esquema canónico para él (hoy solo logs web: "
-              "necesita fecha y URL o línea de petición). No se puede generar un mapping ingerible.",
-        "en": "The file looks like type '{type}' and there is no canonical schema for it yet (today only web logs: "
-              "it needs a date and a URL or request line). An ingestible mapping cannot be generated.",
+        "es": "El archivo parece de tipo '{type}' y todavía no hay un esquema canónico para él (hoy solo logs web, que necesitan "
+              "fecha y URL o línea de petición, y de firewall, que necesitan fecha, origen y destino). No se puede generar un mapping ingerible.",
+        "en": "The file looks like type '{type}' and there is no canonical schema for it yet (today only web logs, which need "
+              "a date and a URL or request line, and firewall logs, which need a date, a source and a destination). An ingestible mapping cannot be generated.",
     },
     "decision.missing_timestamp": {"es": "No se encontró un campo de fecha interpretable.", "en": "No parseable date field was found."},
     "decision.missing_uri": {"es": "No se encontró un campo de URL ni de línea de petición HTTP.",

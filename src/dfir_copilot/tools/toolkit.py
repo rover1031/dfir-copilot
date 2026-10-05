@@ -143,7 +143,7 @@ class Toolkit:
             # sin `note`: es texto libre del analista (quién la declaró y cuándo); P1-a ya decidió no enviarlo nunca al modelo
             "timezone": {k: v for k, v in (m.get("timezone") or {}).items() if k != "note"},
             "roles": self.roles.as_record(),
-            "detectors": available(),
+            "detectors": available(m.get("log_schema", "web")),
         }
 
     def _run_query(self, args: QueryArgs) -> dict:

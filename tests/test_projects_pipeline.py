@@ -117,7 +117,7 @@ def test_un_archivo_no_soportado_se_detiene_en_el_primer_paso_con_su_motivo(base
     project = make_project(base, use_llm=False)
     notas = next(f for f in project.files() if f.name == "notas.txt")
     st = run_pipeline(project, notas, Deps())
-    assert st["state"] == "failed" and st["steps"]["draft"]["status"] == "failed"
+    assert st["state"] == "unsupported" and st["steps"]["draft"]["status"] == "unsupported"   # no es un fallo: no hay nada que reintentar
     assert "no soportado" in st["steps"]["draft"]["message"]
     assert all(st["steps"][s]["status"] == "skipped" for s in STEPS[1:])
 
@@ -260,3 +260,37 @@ def test_new_status_y_llm_status(base):
     assert st["state"] == "pending" and list(st["steps"]) == list(STEPS)
     ok_, msg = llm_status()
     assert isinstance(ok_, bool) and isinstance(msg, str)
+
+
+# --- logs de firewall y tipos de log todavía sin soporte ----------------------------------------------------------------
+
+def test_un_log_de_firewall_se_analiza_de_punta_a_punta_sin_modelo(tmp_path):
+    from dfir_copilot.synthetic_firewall import make_firewall_dataset, write_firewall
+
+    inbox = tmp_path / "inbox" / "fw"
+    inbox.mkdir(parents=True)
+    rows, truth = make_firewall_dataset(hosts=20, days=35)
+    write_firewall(rows, inbox / "firewall.csv", "paloalto")
+    project = Project.create("Firewall", inbox, ProjectSettings(analyst="eder", use_llm=False), root=tmp_path / "projects", base=tmp_path)
+    st = run_pipeline(project, project.files()[0], Deps())
+    steps = {k: v["status"] for k, v in st["steps"].items()}
+    assert steps["ingest"] in ("done", "needs_attention") and steps["copy"] == "done" and steps["detectors"] == "done", st
+    assert st["state"] in ("done", "needs_attention") and "hallazgo(s)" in st["steps"]["detectors"]["message"]
+    ws = project.workspace(project.files()[0].case_id)
+    assert ws.verify().ok and ws.engine().manifest["log_schema"] == "network"
+    entries = ws.ledger(ws.engine()).entries("finding")
+    names = {e.get("detector") or e.get("data", {}).get("detector") for e in entries}
+    assert {"service_fanout", "policy_contradiction", "risky_outbound", "volume_outlier", "beaconing", "blocked_then_allowed"} <= names, names
+
+
+def test_un_log_de_otro_tipo_se_declara_no_soportado_y_no_como_error(tmp_path):
+    inbox = tmp_path / "inbox" / "dns"
+    inbox.mkdir(parents=True)
+    (inbox / "dns.csv").write_text("timestamp,qname,qtype,client\n2026-10-04 10:00:00,example.com,A,10.0.0.1\n"
+                                   "2026-10-04 10:00:01,example.org,A,10.0.0.2\n", encoding="utf-8")
+    project = Project.create("Dns", inbox, ProjectSettings(analyst="eder", use_llm=False), root=tmp_path / "projects", base=tmp_path)
+    st = run_pipeline(project, project.files()[0], Deps())
+    assert st["state"] == "unsupported" and st["steps"]["draft"]["status"] == "unsupported"
+    assert "no soportado" in st["steps"]["draft"]["message"]
+    case_json = project.cases_dir / project.files()[0].case_id / "case.json"
+    assert not (json.loads(case_json.read_text(encoding="utf-8")).get("dataset") if case_json.exists() else None)   # no se ingirió nada

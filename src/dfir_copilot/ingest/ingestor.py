@@ -21,12 +21,12 @@ import yaml
 from dfir_copilot.i18n import t
 from dfir_copilot.profiling.readers import SourceError, leaf_exprs, open_source, relation_sql
 from dfir_copilot.profiling.semantics import es_to_en_months
-from dfir_copilot.schema import CANONICAL_FIELDS
+from dfir_copilot.schema import CANONICAL_FIELDS, NETWORK_FIELDS, SCHEMAS
 
 MAPPINGS_DIR = Path(__file__).parent / "mappings"
 _IDENT = re.compile(r"^[a-z_][a-z0-9_]*$")
 _TYPES = {"VARCHAR", "BIGINT", "INTEGER", "SMALLINT", "DOUBLE"}
-_SCHEMA = {f.name: f.dtype for f in CANONICAL_FIELDS}
+_SCHEMA = {f.name: f.dtype for f in (*CANONICAL_FIELDS, *NETWORK_FIELDS)}
 _SPECIAL_INPUTS = {"timestamp", "uri", "request_line"}  # entradas que no son campos canónicos directos
 _ROLES = ("actor", "resource")  # qué columna es quién actúa y sobre qué (ver detectors/roles.py)
 FORMATS = ("auto", "csv", "tsv", "json", "parquet")
@@ -187,7 +187,14 @@ def _validate(m: dict) -> None:
     fields = m["fields"]
     if "timestamp" not in fields:
         raise ValueError("fields debe incluir 'timestamp'")
-    if "uri" not in fields and "endpoint" not in fields and "request_line" not in fields:
+    kind = m.get("schema", "web")
+    if kind not in SCHEMAS:
+        raise ValueError(f"schema desconocido: {kind!r} (válidos: {', '.join(SCHEMAS)})")
+    if kind == "network":
+        for need in ("src_ip", "dst_ip"):
+            if need not in fields:
+                raise ValueError(f"Un mapping de red (schema: network) necesita '{need}' en fields")
+    elif "uri" not in fields and "endpoint" not in fields and "request_line" not in fields:
         raise ValueError("fields debe incluir 'uri' o 'endpoint' (o 'request_line', la petición HTTP completa)")
     for canon in fields:
         if canon not in _SCHEMA and canon not in _SPECIAL_INPUTS:
@@ -363,6 +370,9 @@ def build_query(m: dict, rel: str, leaves: dict) -> str:
         else:
             expr = f"CAST(NULL AS {fld.dtype})"
         items.append(f"{expr} AS {_q(n)}")
+    for fld in NETWORK_FIELDS:  # solo las que el mapping aporta: un log web no gana columnas
+        if fld.name in base:
+            items.append(f"{_q(fld.name)} AS {_q(fld.name)}")
     items.append("timestamp_raw")
     for n, spec in derived.items():
         if n not in _SCHEMA:
@@ -505,6 +515,7 @@ def ingest_file(
         },
         "mapping": {"path": mapping["_path"], "sha256": mapping["_sha256"]},
         "roles": mapping.get("roles"),  # qué columnas son actor y recurso para los detectores
+        **({"log_schema": mapping["schema"]} if mapping.get("schema", "web") != "web" else {}),  # tipo de log (solo si no es web)
         "timezone": {
             "assumed": tz_name,
             "verified": verified,

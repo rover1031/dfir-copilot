@@ -127,7 +127,7 @@ de parámetros pueden ser descriptivos. Ambos son metadatos de esquema, no regis
 | **P1-b** | Agente. b.1 filtro de notebooks, perfilado canónico y resumen por rol · b.2 copia seudonimizada (`priv-1`) y agente, toolkit, ledger y replay sobre ella (`privacidad.md`) · b.3a texto del analista traducido a alias · b.3b falsabilidad (`falsabilidad.md`) · b.3c tope de tokens por pregunta y por caso, notas del analista visibles en cada pregunta, retirar hipótesis (`presupuesto_y_notas.md`) | Hecho |
 | **P1-c** | Conversación persistente en disco (`ws.checkpointer()`): una aprobación pendiente o una conversación en curso sobreviven a reiniciar el kernel; un hilo no se reanuda con otro prompt u otra copia de datos. Reproducibilidad: aviso en `run_query` y `nondeterministic` en el replay (`persistencia_y_reproducibilidad.md`) | Hecho |
 | **P2** | Entrega. **Hecho:** informe forense Markdown bilingüe generado desde el ledger, en variante interna y compartible, con botón *Exportar* (`informe.md`); proyectos (una carpeta = un caso por archivo) con análisis automático al crearlos e interfaz web Django + HTMX (`interfaz_web.md`). **Pendiente:** README, CLI (`dfir ingest`, `dfir ask`), prompt del agente en inglés y PDF. `nbstripout`: resuelto con `tools/strip_notebook_outputs.py` | Parcial |
-| **P3** | Ampliación: logs no web (autenticación, EDR, firewall) con esquema canónico propio, Excel, GeoIP offline, inteligencia en PDF | Pendiente |
+| **P3** | Ampliación: logs no web (autenticación, EDR, firewall) con esquema canónico propio, Excel, GeoIP offline, inteligencia en PDF | **Firewall hecho** (ver `docs/firewall.md`); pendientes autenticación, EDR, Excel, GeoIP y PDF |
 
 **Transversal (fuera de P1–P3)**
 
@@ -311,7 +311,8 @@ no, con la misma lectura que el perfilador. Novedades del mapping:
 ### 13.5 Límites conocidos
 
 * **Solo logs web.** El esquema canónico tiene 13 campos web. La telemetría de EDR, firewall o autenticación se
-  reconoce y se perfila, pero el Inspector la declara `unsupported`; necesita su propio esquema (pendiente P3).
+  reconoce y se perfila; si es de firewall se ingiere con el esquema de red (`docs/firewall.md`); si es de otro tipo (autenticación, EDR, DNS),
+  el Inspector la declara `unsupported`: necesita su propio esquema (pendiente P3).
 * **Qué se propone sale de una muestra** (20 000 filas por defecto, reproducible): un parámetro presente solo en filas
   que la muestra no contiene no se propone. Los prefijos y la cobertura sí se verifican en el archivo completo.
 * **Prefijo+id solo con separadores conocidos:** `-ID-`, `_ID_`, `:` y `|`.

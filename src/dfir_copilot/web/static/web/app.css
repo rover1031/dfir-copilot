@@ -18,7 +18,7 @@ button:disabled { opacity:.5; cursor:not-allowed; }
 .chip { display:inline-block; padding:1px 8px; margin:1px 3px 1px 0; border-radius:999px; font-size:12px; border:1px solid var(--line); background:#fff; }
 .chip-done { color:var(--ok); border-color:#abefc6; background:#ecfdf3; } .chip-running { color:var(--accent); border-color:#b2ccff; background:#eff4ff; }
 .chip-needs_attention { color:var(--warn); border-color:#fedf89; background:#fffaeb; } .chip-failed { color:var(--bad); border-color:#fda29b; background:#fef3f2; }
-.chip-skipped { color:var(--muted); } .chip-pending { color:var(--muted); background:#f9fafb; }
+.chip-skipped { color:var(--muted); } .chip-unsupported { color:#6941c6; border-color:#d9d6fe; background:#f4f3ff; } .chip-pending { color:var(--muted); background:#f9fafb; }
 .badge { display:inline-block; padding:1px 9px; border-radius:6px; font-size:12px; font-weight:600; background:#eef2f6; }
 .badge.confirmada { background:#ecfdf3; color:var(--ok); } .badge.refutada,.badge.retirada { background:#f2f4f7; color:var(--muted); } .badge.en_prueba { background:#fffaeb; color:var(--warn); }
 .msg { padding:9px 12px; border-radius:8px; margin:8px 0; border:1px solid var(--line); background:#fff; }

@@ -95,6 +95,14 @@ def _open_project(pid: str) -> Project:
         raise Http404(str(exc)) from exc
 
 
+def _ingested(project: Project, case_id: str) -> bool:
+    """¿El caso tiene un dataset ingerido? Un archivo no soportado o que falló antes de ingerir no tiene nada que abrir."""
+    try:
+        return bool(json.loads((project.cases_dir / case_id / "case.json").read_text(encoding="utf-8")).get("dataset"))
+    except (OSError, ValueError):
+        return False
+
+
 def _project_rows(project: Project) -> tuple[list[dict], bool]:
     sv = get_services()
     rows, running = [], False
@@ -105,7 +113,7 @@ def _project_rows(project: Project) -> tuple[list[dict], bool]:
         # estado "running" en disco sin hilo vivo: el servidor se reinició a mitad de un análisis
         interrupted = bool(st and st.get("state") == "running" and not is_running)
         rows.append({"file": f, "status": st, "running": is_running, "interrupted": interrupted,
-                     "has_case": (project.cases_dir / f.case_id / "case.json").exists(),
+                     "has_case": _ingested(project, f.case_id),
                      "steps": list((st or {}).get("steps", {}).items())})
     return rows, running
 

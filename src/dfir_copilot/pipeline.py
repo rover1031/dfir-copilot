@@ -29,7 +29,7 @@ from dfir_copilot.projects import Project, SourceFile
 from dfir_copilot.tools.sanitize import clean_text
 
 STEPS = ("draft", "interpret", "ingest", "copy", "detectors", "explore", "triage")
-STEP_STATUS = ("pending", "running", "done", "skipped", "needs_attention", "failed")
+STEP_STATUS = ("pending", "running", "done", "skipped", "needs_attention", "unsupported", "failed")
 
 TRIAGE_QUESTION = {
     "es": ("Haz un triaje inicial de este dataset. Usa los detectores, formula como máximo dos hipótesis falsables con su criterio de "
@@ -79,6 +79,8 @@ def new_status(source: SourceFile) -> dict:
 
 def _overall(steps: dict) -> str:
     values = [v["status"] for v in steps.values()]
+    if "unsupported" in values:  # formato que todavía no sabemos ingerir: no es un fallo, y no hay nada que reintentar
+        return "unsupported"
     if "failed" in values:
         return "failed"
     if "running" in values or "pending" in values:
@@ -157,7 +159,7 @@ class Pipeline:
     # --- etapas -------------------------------------------------------------------------------------------------------
     def _step_draft(self):
         if not self.source.supported:
-            raise _Stop("failed", f"formato no soportado: {self.source.name}")
+            raise _Stop("unsupported", f"formato de archivo no soportado: {self.source.name} (se admiten csv, tsv, json, ndjson y parquet)")
         if self.ws.meta.get("dataset"):
             return "done", "el caso ya está ingerido"
         from dfir_copilot.profiling import inspect_source
@@ -169,9 +171,11 @@ class Pipeline:
         self.p1.mkdir(parents=True, exist_ok=True)
         self._draft.save(self.p1 / "mapping_borrador.yaml")
         if self._draft.status == "unsupported":
-            raise _Stop("failed", "formato de log no soportado todavía (logs que no son de acceso web: P3)")
+            why = next((d.message for d in self._draft.decisions if d.code == "unsupported_log_type"), "tipo de log sin esquema todavía")
+            raise _Stop("unsupported", f"formato de log no soportado todavía: {why}")
         if self._draft.status == "needs_review":
-            return "needs_attention", "mapping aceptado automáticamente con decisiones por revisar"
+            codes = ", ".join(d.code for d in self._draft.decisions if d.level == "required")
+            return "needs_attention", f"mapping aceptado automáticamente; decisiones por revisar: {codes}"
         return "done", f"mapping propuesto ({self._draft.log_type})"
 
     def _step_interpret(self):

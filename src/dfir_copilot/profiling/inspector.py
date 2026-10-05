@@ -18,7 +18,9 @@ from dfir_copilot.profiling.schema_mapper import SchemaMapper, normalize_name
 
 # Campos canónicos que el esquema actual sabe ingerir (ver schema.py); el resto se informa pero no se ingiere.
 INGESTIBLE = ("timestamp", "src_ip", "user_id", "session_id", "http_method", "host", "uri", "status_code",
-              "user_agent", "referer", "bytes_out")
+              "user_agent", "referer", "bytes_out",
+              # extensión de red (firewalls y flujos): ver schema.NETWORK_FIELDS
+              "dst_ip", "src_port", "dst_port", "protocol", "action", "rule_name", "application", "bytes_in")
 _SEPARATORS = ("-ID-", "_ID_", ":", "|")  # prefijo+SEP+identificador: ATUSER-ID-ana, user:ana…
 _SECRET_KEY = re.compile(r"token|key|pass|pwd|secret|auth|clave|contrase|credential", re.I)
 _VALUE_RX = r"[^&#;\s]"
@@ -120,7 +122,10 @@ def _y(value) -> str:
 def _dump_yaml(d: MappingDraft) -> str:
     m, lang = d.mapping, d.lang
     out = [f"# {t('inspector.yaml.header', lang)}", f"source: {_y(m['source'])}", f"description: {_y(m['description'])}",
-           f"format: {m['format']}", ""]
+           f"format: {m['format']}"]
+    if m.get("schema"):
+        out.append(f"schema: {m['schema']}")
+    out.append("")
     if "inspector" in m:
         out += ["inspector:", *(f"  {k}: {_y(v)}" for k, v in m["inspector"].items()), ""]
     out.append("fields:")
@@ -365,9 +370,11 @@ def inspect_source(path: str | Path, *, lang: str | None = None, profile: DataPr
     # 3) columnas derivadas de la URL (análisis local de valores)
     derived: list[DerivedProposal] = []
     url_field = fields.get("uri") or fields.get("request_line")
-    if url_field is None:
-        decisions.append(Decision("missing_uri", "required", t("decision.missing_uri", lang)))
     log_type = profile.log_type_hints[0].type if profile.log_type_hints else "unknown"
+    # firewall / flujo de red: se ingiere con el esquema de red si hay hora, origen y destino (no necesita URL)
+    network = log_type in ("firewall", "network") and {"timestamp", "src_ip", "dst_ip"} <= set(fields)
+    if url_field is None and not network:
+        decisions.append(Decision("missing_uri", "required", t("decision.missing_uri", lang)))
     if url_field is not None and by_path.get(url_field) and by_path[url_field].url_param_keys:
         con = restricted_connection(path, "2GB")
         try:
@@ -407,11 +414,14 @@ def inspect_source(path: str | Path, *, lang: str | None = None, profile: DataPr
     if derived:
         mapping["derived"] = {p.name: {"from": "query_string", "regex": p.regex,
                                        **({"type": p.type} if p.type != "VARCHAR" else {})} for p in derived}
+    if network:
+        roles = {"actor": "src_ip", "resource": "dst_ip"}  # quién origina la conexión y a qué destino va
+        mapping["schema"] = "network"
     if roles:
         mapping["roles"] = roles
 
     # 5) ¿se puede ingerir?
-    if "timestamp" not in fields or url_field is None:
+    if "timestamp" not in fields or (url_field is None and not network):
         if log_type not in ("web", "proxy"):
             decisions.insert(0, Decision("unsupported_log_type", "required", t(
                 "decision.unsupported_log_type", lang, type=profile.log_type_hints[0].label)))

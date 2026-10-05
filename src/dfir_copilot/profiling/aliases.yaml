@@ -12,7 +12,7 @@ timestamp:
   domain: common
   description: {es: Instante del evento, en: Event time}
   semantics: [timestamp]
-  aliases: [timestamp, "@timestamp", ts, _time, datetime, date_time, event_time, eventtime, time_local, time_generated,
+  aliases: [receive_time, generated_time, start_time, event_start_time, timestamp, "@timestamp", ts, _time, datetime, date_time, event_time, eventtime, time_local, time_generated,
             created_at, creation_time, log_time, utc_time, event_timestamp, time_created,
             fecha_hora, fecha_evento, marca_tiempo, marca_de_tiempo, fecha_registro, hora_evento, fecha_y_hora]
   weak_aliases: [time, date, fecha, hora, tiempo]
@@ -21,7 +21,7 @@ src_ip:
   domain: network
   description: {es: IP de origen, en: Source IP}
   semantics: [ipv4, ipv6]
-  aliases: [src_ip, source_ip, source_address, src_addr, client_ip, clientip, remote_addr, remote_ip, c_ip, caller_ip,
+  aliases: [srcip, source_ip_addr, src_ip, source_ip, source_address, src_addr, client_ip, clientip, remote_addr, remote_ip, c_ip, caller_ip,
             source_ip_address, ip_address, local_address_ip4, ip_src, sourceip, client_address, x_forwarded_for,
             ip_origen, direccion_ip, direccion_ip_origen, ip_cliente, origen_ip, ip_de_origen, ip_fuente]
   weak_aliases: [ip, ip_addr, address, direccion, origen]
@@ -30,19 +30,19 @@ dst_ip:
   domain: network
   description: {es: IP de destino, en: Destination IP}
   semantics: [ipv4, ipv6]
-  aliases: [dst_ip, dest_ip, destination_ip, destination_address, dst_addr, server_ip, s_ip, remote_address_ip4,
+  aliases: [dstip, dest_address, destination_host_ip, dst_ip, dest_ip, destination_ip, destination_address, dst_addr, server_ip, s_ip, remote_address_ip4,
             target_ip, ip_dst, ip_destino, direccion_ip_destino, ip_servidor, ip_de_destino]
   weak_aliases: [destino]
 
 src_port:
   domain: network
   description: {es: Puerto de origen, en: Source port}
-  aliases: [src_port, source_port, sport, client_port, local_port, puerto_origen, puerto_de_origen]
+  aliases: [srcport, src_port, source_port, sport, client_port, local_port, puerto_origen, puerto_de_origen]
 
 dst_port:
   domain: network
   description: {es: Puerto de destino, en: Destination port}
-  aliases: [dst_port, dest_port, destination_port, dport, server_port, remote_port, s_port, puerto_destino,
+  aliases: [dstport, dst_port, dest_port, destination_port, dport, server_port, remote_port, s_port, puerto_destino,
             puerto_de_destino]
   weak_aliases: [port, puerto]
 
@@ -62,7 +62,7 @@ user_id:
   domain: common
   description: {es: Identidad del actor, en: Actor identity}
   # Orden = preferencia: nombres legibles antes que identificadores numéricos (uid)
-  aliases: [user_id, user_name, username, user, userid, account_name, account, principal, user_principal_name, upn,
+  aliases: [srcuser, source_user, src_user, user_origen, usuario_origen, user_src, user_id, user_name, username, user, userid, account_name, account, principal, user_principal_name, upn,
             subject_user_name, target_user_name, user_identity_arn, cs_username, login, uid,
             usuario, nombre_usuario, nombre_de_usuario, id_usuario, cuenta, cuenta_usuario, login_usuario]
   weak_aliases: [actor, name, nombre]
@@ -76,7 +76,7 @@ host:
   domain: common
   description: {es: Equipo o host, en: Host}
   semantics: [domain]
-  aliases: [host, hostname, host_name, http_host, computer, computer_name, device_name, machine, server_name,
+  aliases: [observer_name, observer_hostname, devname, firewall_name, nombre_dispositivo, host, hostname, host_name, http_host, computer, computer_name, device_name, machine, server_name,
             cs_host, nombre_equipo, equipo, nombre_host, servidor, dispositivo, maquina]
 
 http_method:
@@ -117,14 +117,14 @@ referer:
 bytes_out:
   domain: network
   description: {es: Bytes enviados, en: Bytes sent}
-  aliases: [bytes_out, bytes_sent, body_bytes_sent, sc_bytes, response_size, response_bytes, out_bytes, sent_bytes,
+  aliases: [source_bytes, client_bytes, sentbyte, bytes_enviados, bytes_out, bytes_sent, body_bytes_sent, sc_bytes, response_size, response_bytes, out_bytes, sent_bytes,
             bytes_enviados, tamano_respuesta, bytes_salida]
   weak_aliases: [bytes, size, tamano]
 
 bytes_in:
   domain: network
   description: {es: Bytes recibidos, en: Bytes received}
-  aliases: [bytes_in, bytes_received, cs_bytes, request_size, in_bytes, received_bytes, bytes_recibidos, bytes_entrada]
+  aliases: [destination_bytes, server_bytes, rcvdbyte, bytes_in, bytes_received, cs_bytes, request_size, in_bytes, received_bytes, bytes_recibidos, bytes_entrada]
 
 dns_query:
   domain: dns
@@ -177,3 +177,14 @@ file_hash:
   # Orden = preferencia: SHA-256 antes que SHA-1 y MD5 cuando el evento trae varios
   aliases: [file_hash, sha256, sha256_hash_data, file_hash_sha256, process_hash_sha256, hash_sha256, hash, hashes,
             sha1, sha1_hash_data, md5, md5_hash_data, hash_archivo, huella]
+
+rule_name:
+  domain: network
+  description: {es: Regla o política aplicada, en: Rule or policy applied}
+  aliases: [rule, rule_id, rule_name, ruleid, rulename, policy, policy_id, policyid, policy_name, access_rule, firewall_rule,
+            security_rule, regla, id_regla, nombre_regla, regla_aplicada, politica, politica_aplicada]
+
+application:
+  domain: network
+  description: {es: Aplicación identificada, en: Application identified}
+  aliases: [application, app, app_name, application_name, app_id, appid, aplicacion, nombre_aplicacion]

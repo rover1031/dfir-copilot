@@ -84,3 +84,9 @@ crear el proyecto). Con "usar el modelo" apagado, el análisis es 100 % local y 
 * La interfaz está en español; el informe sí es bilingüe.
 * Si el servidor se reinicia a mitad de un análisis, el archivo se ve como *interrumpido* y se reanuda con *Reanalizar*.
 * Las aprobaciones reanudan al agente, así que necesitan el modelo configurado.
+
+## Estados de un archivo
+
+`done`, `needs_attention` (terminó y hay algo que revisar), `skipped`, `failed` (error: se corrige y **Reanalizar** reanuda) y
+`unsupported` (el formato o el tipo de log todavía no se sabe ingerir: **no es un error** y reanalizar no cambia nada). El botón
+**Abrir caso** solo aparece cuando el archivo llegó a ingerirse.

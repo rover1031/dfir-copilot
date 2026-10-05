@@ -4,7 +4,7 @@
 <td><strong>{{ r.file.name }}</strong><br><small>{{ r.file.size|filesizeformat }}</small></td>
 <td>{% if not r.file.supported %}<span class="chip chip-skipped">{{ r.file.reason }}</span>
 {% elif r.status %}{% for name, s in r.steps %}<span class="chip chip-{{ s.status }}" title="{{ s.message }}">{{ name }}</span>{% endfor %}
-<br><small class="muted">{% if r.running %}en curso…{% elif r.interrupted %}interrumpido (se reinició el servidor): pulsa Reanalizar{% else %}{{ r.status.state }}{% endif %}</small>
+<br><small class="muted">{% if r.running %}en curso…{% elif r.interrupted %}interrumpido (se reinició el servidor): pulsa Reanalizar{% elif r.status.state == "unsupported" %}no soportado todavía (no es un error){% else %}{{ r.status.state }}{% endif %}</small>
 {% for name, s in r.steps %}{% if s.message and s.status != "pending" %}<br><small class="muted">{{ name }}: {{ s.message }}</small>{% endif %}{% endfor %}
 {% else %}<span class="chip chip-pending">pendiente</span>{% endif %}</td>
 <td style="white-space:nowrap">{% if r.has_case %}<a class="btn" href="/proyectos/{{ project.id }}/casos/{{ r.file.case_id }}/">Abrir caso</a>{% endif %}

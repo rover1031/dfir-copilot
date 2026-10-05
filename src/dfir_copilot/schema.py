@@ -30,3 +30,19 @@ CANONICAL_FIELDS: tuple[Field, ...] = (
 )
 
 CANONICAL_NAMES: tuple[str, ...] = tuple(f.name for f in CANONICAL_FIELDS)
+
+
+# Extensión de red (firewalls y flujos). NO forma parte de las columnas que siempre salen en el Parquet: solo aparecen si el mapping las
+# mapea y declara `schema: network`. Así los logs web quedan exactamente como estaban (mismas columnas, mismos hashes).
+NETWORK_FIELDS: tuple[Field, ...] = (
+    Field("dst_ip", "VARCHAR", "IP de destino de la conexión"),
+    Field("src_port", "INTEGER", "Puerto de origen"),
+    Field("dst_port", "INTEGER", "Puerto de destino"),
+    Field("protocol", "VARCHAR", "Protocolo de transporte (TCP, UDP, ICMP...)"),
+    Field("action", "VARCHAR", "Acción del dispositivo (ALLOW, BLOCK, DROP...)"),
+    Field("rule_name", "VARCHAR", "Regla o política que se aplicó"),
+    Field("application", "VARCHAR", "Aplicación identificada por el dispositivo, si la expone"),
+    Field("bytes_in", "BIGINT", "Bytes recibidos por el origen, si existen"),
+)
+NETWORK_NAMES: tuple[str, ...] = tuple(f.name for f in NETWORK_FIELDS)
+SCHEMAS = ("web", "network")  # tipos de log que el ingestor sabe normalizar

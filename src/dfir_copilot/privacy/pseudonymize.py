@@ -63,7 +63,11 @@ _NUMERIC = {"BIGINT", "INTEGER", "SMALLINT", "TINYINT", "HUGEINT", "DOUBLE", "FL
 DEFAULT_RULES = {
     "source_row": ("keep", None), "timestamp_utc": ("keep", None), "timestamp_raw": ("keep", None),
     "http_method": ("keep", None), "status_code": ("keep", None), "bytes_out": ("keep", None),
-    "src_ip": ("ip", "IP"), "user_id": ("alias", "U"), "session_id": ("alias", "S"), "host": ("alias", "H"),
+    "src_ip": ("ip", "IP"), "dst_ip": ("ip", "DST"), "user_id": ("alias", "U"),
+    # extensión de red: puertos, protocolo, acción, regla, aplicación y bytes no identifican a nadie: vocabulario técnico (se pueden pasar
+    # a alias con PrivacyPolicy(overrides={"rule_name": "alias"})); la IP de destino sí es un dato y va como alias con su alcance y red
+    "src_port": ("keep", None), "dst_port": ("keep", None), "protocol": ("keep", None), "action": ("keep", None),
+    "rule_name": ("keep", None), "application": ("keep", None), "bytes_in": ("keep", None), "session_id": ("alias", "S"), "host": ("alias", "H"),
     "referer": ("alias", "REF"), "query_string": ("mask_values", None), "endpoint": ("mask_ids", None),
     "user_agent": ("scrub", None),
 }
@@ -221,8 +225,9 @@ def build_pseudonymized(parquet: str | Path, manifest: dict, out_dir: str | Path
                 joins.append(f"LEFT JOIN {t} ON CAST(src.{c} AS VARCHAR) = {t}.v")
                 select.append(f"{t}.alias AS {c}")
                 if kind == "ip":
+                    net_prefix = "N" if col == "src_ip" else f"N{prefix}"  # alias de red propios por columna: sin colisiones origen/destino
                     scope_sql, net_sql = _ipv4_sql("v")
-                    con.execute(f"CREATE TABLE __ipinfo AS SELECT v, {scope_sql} AS scope, {net_sql} AS net FROM {t} "
+                    con.execute(f"CREATE TABLE __ipinfo{i} AS SELECT v, {scope_sql} AS scope, {net_sql} AS net FROM {t} "
                                 f"WHERE regexp_full_match(v, {_lit(IPV4_RE)})")
                     # IPv6 y valores que no son IPv4 (pocos en la práctica): en Python, cargados en bloque, no fila a fila
                     rest = [v for (v,) in con.execute(f"SELECT v FROM {t} WHERE NOT regexp_full_match(v, {_lit(IPV4_RE)})")
@@ -232,21 +237,21 @@ def build_pseudonymized(parquet: str | Path, manifest: dict, out_dir: str | Path
 
                         info = [ip_scope(v) for v in rest]
                         con.register("__rest", pa.table({"v": rest, "scope": [i[0] for i in info], "net": [i[1] for i in info]}))
-                        con.execute("INSERT INTO __ipinfo SELECT v, scope, net FROM __rest")
+                        con.execute(f"INSERT INTO __ipinfo{i} SELECT v, scope, net FROM __rest")
                         con.unregister("__rest")
-                    nets = con.execute("SELECT count(DISTINCT net) FROM __ipinfo").fetchone()[0]
+                    nets = con.execute(f"SELECT count(DISTINCT net) FROM __ipinfo{i}").fetchone()[0]
                     # alias de red por orden de primera aparición de cualquiera de sus IPs (determinista)
-                    con.execute(f"""CREATE TABLE __nets AS
-                        SELECT net, 'N-' || lpad(CAST(row_number() OVER (ORDER BY first_row, net) AS VARCHAR),
+                    con.execute(f"""CREATE TABLE __nets{i} AS
+                        SELECT net, {_lit(net_prefix + '-')} || lpad(CAST(row_number() OVER (ORDER BY first_row, net) AS VARCHAR),
                                {_width(nets)}, '0') AS alias
-                        FROM (SELECT i.net, min(a.first_row) AS first_row FROM __ipinfo i
+                        FROM (SELECT i.net, min(a.first_row) AS first_row FROM __ipinfo{i} i
                               JOIN (SELECT CAST({c} AS VARCHAR) AS v, min(source_row) AS first_row FROM src GROUP BY 1) a
                                 ON a.v = i.v WHERE i.net IS NOT NULL GROUP BY 1)""")
-                    con.execute(f"INSERT INTO __aliases SELECT {_lit(col + '_net')}, net, alias FROM __nets")
-                    joins.append(f"LEFT JOIN __ipinfo ON CAST(src.{c} AS VARCHAR) = __ipinfo.v "
-                                 "LEFT JOIN __nets ON __ipinfo.net = __nets.net")
-                    select.append(f"__ipinfo.scope AS {_q(col + '_scope')}")
-                    select.append(f"__nets.alias AS {_q(col + '_net')}")
+                    con.execute(f"INSERT INTO __aliases SELECT {_lit(col + '_net')}, net, alias FROM __nets{i}")
+                    joins.append(f"LEFT JOIN __ipinfo{i} ON CAST(src.{c} AS VARCHAR) = __ipinfo{i}.v "
+                                 f"LEFT JOIN __nets{i} ON __ipinfo{i}.net = __nets{i}.net")
+                    select.append(f"__ipinfo{i}.scope AS {_q(col + '_scope')}")
+                    select.append(f"__nets{i}.alias AS {_q(col + '_net')}")
             elif kind == "shift":
                 (low,) = con.execute(f"SELECT min({c}) FROM src").fetchone()
                 low = low if low is not None else 0
@@ -284,6 +289,7 @@ def build_pseudonymized(parquet: str | Path, manifest: dict, out_dir: str | Path
         "treatments": treatments,
         "timezone": manifest.get("timezone"),  # conserva timestamp_local si la zona fue declarada
         "roles": manifest.get("roles"),
+        **({"log_schema": manifest["log_schema"]} if manifest.get("log_schema") else {}),
         "time_range_utc": manifest.get("time_range_utc"),
         "null_counts": manifest.get("null_counts", {}),
         "warnings": [],

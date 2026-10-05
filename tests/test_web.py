@@ -96,6 +96,7 @@ def test_crear_un_proyecto_lanza_el_analisis_y_muestra_el_avance(env):
     client, sv, _ = env
     page = client.get("/proyectos/analisis-1/").content.decode()
     assert "three_months.csv" in page and "formato no soportado" in page and "Abrir caso" in page
+    assert page.count("Abrir caso") == 1                                  # solo el archivo ingerido: notas.txt no tiene nada que abrir
     for step in ("draft", "ingest", "copy", "detectors", "triage"):
         assert f">{step}<" in page
     st = Project.open("analisis-1").status("analisis-1--three-months")

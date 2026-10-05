@@ -77,8 +77,14 @@ def test_con_marca_de_tiempo_en_el_perfil_hay_utc_y_texto_original_aunque_el_map
 
 
 def test_un_nombre_canonico_del_perfilador_sin_columna_en_la_tabla_se_ignora_sin_romper():
-    profile = make_profile({"dst_ip": "ip", "uri": "path"}, with_timestamp=False)    # dst_ip: la tabla actual no lo tiene
+    profile = make_profile({"dns_query": "ip", "uri": "path"}, with_timestamp=False)    # dns_query: la tabla no tiene esa columna
     assert list(columns_from_profile(profile)) == ["source_row", "endpoint", "query_string"]
+
+
+def test_las_columnas_de_red_son_consultables_cuando_el_perfil_las_mapea():
+    profile = make_profile({"dst_ip": "ip", "dst_port": "code", "uri": "path"}, with_timestamp=False)
+    cols = columns_from_profile(profile)
+    assert cols["dst_ip"] == "VARCHAR" and cols["dst_port"] == "INTEGER"
 
 
 def test_el_perfilador_y_la_tabla_difieren_solo_donde_se_declara():
