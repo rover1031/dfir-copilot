@@ -45,6 +45,8 @@ _PRIORITY = {"high": 0, "medium": 1, "low": 2}
 TABLE_COLUMNS = {"timestamp": ("timestamp_utc", "timestamp_raw"), "uri": ("endpoint", "query_string")}
 # Columnas que el ingestor añade y no están en `schema.CANONICAL_FIELDS`: (tipo, descripción).
 EXTRA_COLUMNS = {"timestamp_raw": ("VARCHAR", "Original timestamp text as found in the file, before normalizing to UTC")}
+# Columna que el motor calcula en la vista cuando el analista declaró la zona (ver QueryEngine y ingestor.local_timezone).
+LOCAL_COLUMN = "timestamp_local"
 
 
 @functools.cache
@@ -53,7 +55,8 @@ def profile_vocabulary() -> frozenset[str]:
     return frozenset(SchemaMapper().canon)
 
 
-def columns_from_profile(profile: DataProfile, derived: Mapping[str, str] | None = None) -> dict[str, str]:
+def columns_from_profile(profile: DataProfile, derived: Mapping[str, str] | None = None,
+                         local_timezone: str | None = None) -> dict[str, str]:
     """Columnas que el dataset ingerido tendrá, con su tipo DuckDB: las que salen de lo que el perfil mapea (traducidas del
     vocabulario del perfilador al de la tabla), más `source_row`, más las derivadas (`x_...`) que se pasen.
 
@@ -67,6 +70,8 @@ def columns_from_profile(profile: DataProfile, derived: Mapping[str, str] | None
     for m in profile.mapping:
         wanted |= set(TABLE_COLUMNS.get(m.canonical, (m.canonical,)))
     columns = {name: dtypes[name] for name in (*CANONICAL_NAMES, *EXTRA_COLUMNS) if name in wanted}
+    if local_timezone and "timestamp_utc" in columns:
+        columns[LOCAL_COLUMN] = "TIMESTAMP"
     for name, dtype in (derived or {}).items():
         if not _COLUMN_RE.match(name):
             raise ValueError(f"Nombre de columna derivada inválido: {name!r}")

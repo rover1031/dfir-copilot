@@ -147,11 +147,30 @@ class DfirAgent:
         empty = [c for c, n in m.get("null_counts", {}).items() if rows and n == rows]
         context = (
             "\nCONTEXTO DEL CASO\n"
-            f"- Dataset: {rows} filas, {m.get('time_range_utc')} (UTC asumido), sha256 {self.engine.dataset_sha256[:12]}…\n"
-            f"- Zona horaria asumida: {tz.get('assumed')} (verificada: {tz.get('verified')})\n"
+            f"- Dataset: {rows} filas, {m.get('time_range_utc')} (UTC), sha256 {self.engine.dataset_sha256[:12]}…\n"
+            f"- Zona horaria del archivo: {tz.get('assumed')} (origen: {tz.get('source', 'sin registrar')}, "
+            f"verificada: {tz.get('verified')})\n"
+            f"{self._dst_line(tz)}"
+            f"{self._local_line()}"
             f"- Columnas sin datos: {empty}\n"
         )
         return SystemMessage(content=SYSTEM_PROMPT + context)
+
+    @staticmethod
+    def _dst_line(tz: dict) -> str:
+        """Solo si hay filas afectadas por un cambio de horario: su orden dentro de esa hora no es fiable."""
+        n, a = tz.get("dst_nonexistent_rows") or 0, tz.get("dst_ambiguous_rows") or 0
+        if not (n or a):
+            return ""
+        return (f"- Cambio de horario: {a} filas con hora local repetida y {n} con hora local inexistente; no ordenes "
+                f"eventos dentro de esas horas sin advertirlo\n")
+
+    def _local_line(self) -> str:
+        zone = getattr(self.engine, "local_timezone", None)
+        if not zone:
+            return ""
+        return (f"- Columna timestamp_local: hora local en {zone} (sin zona). Úsala para hora del día, días y fines de semana del "
+                f"cliente; para ordenar eventos y medir intervalos usa timestamp_utc\n")
 
     def hypothesis_context(self) -> str:
         """Estado de las hipótesis. También es texto no confiable (el modelo pudo citar al atacante):

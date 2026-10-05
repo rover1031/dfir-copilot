@@ -192,6 +192,61 @@ _MESSAGES: dict[str, dict[str, str]] = {
     "ingest.err.bad_roles": {
         "es": "roles inválido: {detail}", "en": "invalid roles: {detail}",
     },
+    "ingest.err.tz_unknown": {
+        "es": "Zona horaria desconocida: {tz!r}. Usa un nombre IANA exacto (p. ej. America/Santiago, America/Bogota, UTC).{hint}",
+        "en": "Unknown time zone: {tz!r}. Use an exact IANA name (e.g. America/Santiago, America/Bogota, UTC).{hint}",
+    },
+    "ingest.err.tz_hint": {"es": " ¿Quisiste decir: {options}?", "en": " Did you mean: {options}?"},
+    "ingest.err.tz_fixed": {
+        "es": "{tz!r} es un desfase fijo sin cambios de horario{sign}. Usa la zona de la región (p. ej. America/New_York "
+              "en vez de EST). Si el sistema que generó el log usa de verdad un desfase fijo, añade "
+              "timezone_fixed_offset: true en el mapping.",
+        "en": "{tz!r} is a fixed offset with no daylight-saving changes{sign}. Use the region's zone (e.g. America/New_York "
+              "instead of EST). If the system that produced the log truly uses a fixed offset, add "
+              "timezone_fixed_offset: true to the mapping.",
+    },
+    "ingest.err.tz_sign": {"es": " y su signo va al revés: {tz} es UTC{offset}", "en": " and its sign is inverted: {tz} is UTC{offset}"},
+    "ingest.err.ts_keys": {
+        "es": "Clave desconocida en timestamp: {keys}. Válidas: {valid}.",
+        "en": "Unknown key in timestamp: {keys}. Valid: {valid}.",
+    },
+    "ingest.err.ts_type": {"es": "timestamp.{name} debe ser: {expected}.", "en": "timestamp.{name} must be: {expected}."},
+    "ingest.err.tz_source": {
+        "es": "timestamp.timezone_source = {source!r} no cuadra: {reason}",
+        "en": "timestamp.timezone_source = {source!r} does not fit: {reason}",
+    },
+    "ingest.err.tz_source_in_data": {
+        "es": "el formato {fmt!r} no trae zona en el dato (para eso: iso8601 con timezone_in_data, %z, epoch_s/epoch_ms o native).",
+        "en": "format {fmt!r} carries no zone in the value (for that: iso8601 with timezone_in_data, %z, epoch_s/epoch_ms or native).",
+    },
+    "ingest.err.tz_source_declared": {
+        "es": "el formato {fmt!r} ya trae la zona en cada valor, así que una zona declarada no se aplicaría. Quita timezone_source o usa in_data.",
+        "en": "format {fmt!r} already carries the zone in each value, so a declared zone would not be applied. Drop timezone_source or use in_data.",
+    },
+    "ingest.err.tz_source_default": {
+        "es": "'default' significa que nadie declaró la zona, así que debe ser UTC y no estar verificada.",
+        "en": "'default' means nobody declared the zone, so it must be UTC and unverified.",
+    },
+    "ingest.warn.tz_unverified": {
+        "es": "Zona horaria NO verificada: se asumió {tz}",
+        "en": "Time zone NOT verified: {tz} was assumed",
+    },
+    "ingest.warn.tz_ignored": {
+        "es": "La zona declarada {tz} no se aplica: el formato {fmt!r} ya trae su propia zona y las horas se toman del dato.",
+        "en": "The declared zone {tz} is not applied: format {fmt!r} carries its own zone and times are taken from the value.",
+    },
+    "ingest.warn.dst_ambiguous": {
+        "es": "{rows} filas tienen una hora local que ocurre dos veces por el cambio de horario en {tz} (retroceso del reloj): "
+              "se interpretaron como la segunda ocurrencia. Su orden respecto a eventos de esa misma hora no es fiable.",
+        "en": "{rows} rows have a local time that occurs twice due to the daylight-saving change in {tz} (clocks going back): "
+              "they were read as the second occurrence. Their order relative to events in that same hour is unreliable.",
+    },
+    "ingest.warn.dst_nonexistent": {
+        "es": "{rows} filas tienen una hora local que no existe en {tz} (el reloj se adelantó): se desplazaron al convertir "
+              "a UTC. Revisa esas filas: el log puede estar en otra zona o el reloj del sistema mal configurado.",
+        "en": "{rows} rows have a local time that does not exist in {tz} (clocks jumped forward): they were shifted when "
+              "converting to UTC. Check those rows: the log may be in another zone or the system clock misconfigured.",
+    },
     "ingest.warn.derived_empty": {
         "es": "La columna derivada '{name}' quedó vacía en todas las filas: revisa su regex o su campo de origen.",
         "en": "Derived column '{name}' is empty in every row: check its regex or its source field.",
@@ -223,6 +278,17 @@ _MESSAGES: dict[str, dict[str, str]] = {
               "si es otra zona, cambia timezone en el mapping antes de ingerir.",
         "en": "'{field}' carries no time zone: the draft assumes {tz} UNVERIFIED. Ask the export's owner; "
               "if it is another zone, change timezone in the mapping before ingesting.",
+    },
+    "decision.timezone_declared": {
+        "es": "'{field}' no trae zona horaria: se usará {tz}, declarada por el analista y SIN verificar. Cuando el dueño del "
+              "export la confirme, pon timezone_verified: true y anota en timezone_note quién la confirmó y cuándo.",
+        "en": "'{field}' carries no time zone: {tz} will be used, declared by the analyst and UNVERIFIED. When the export's "
+              "owner confirms it, set timezone_verified: true and record in timezone_note who confirmed it and when.",
+    },
+    "decision.timezone_ignored": {
+        "es": "Declaraste {tz}, pero '{field}' ya trae la zona en cada valor: se usa la del dato y tu declaración no se aplica.",
+        "en": "You declared {tz}, but '{field}' already carries the zone in each value: the value's zone is used and your "
+              "declaration is not applied.",
     },
     "decision.mapping_ambiguous": {
         "es": "'{canonical}' podría venir de: {fields}. El borrador usa '{chosen}'; confirma cuál es.",

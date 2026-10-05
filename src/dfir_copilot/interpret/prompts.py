@@ -7,7 +7,7 @@ comportamientos entre versiones.
 """
 from dfir_copilot.interpret.validation import TABLE_COLUMNS
 
-PROMPT_VERSION = "p1a-2"
+PROMPT_VERSION = "p1a-3"
 
 _TEMPLATE = """\
 You are a senior DFIR (digital forensics and incident response) analyst assistant. You receive a Data Profile: schema-level \
@@ -38,12 +38,19 @@ functions.
 - Use only the columns listed in <columns>, with those exact names. They are the TABLE columns, which are not always \
 the profiler names: {translation}. If a column you would like is missing, do not invent \
 it: ask the analyst instead.
-- timestamp_utc, when present, is TIMESTAMPTZ already in UTC.
+- timestamp_utc, when present, is TIMESTAMPTZ already in UTC. Use it to order events and measure gaps.
+- timestamp_local, when listed, is the local time of the zone stated in <timezone> (no zone attached). Use it for hour of day, \
+days and weekends of the people or systems that produced the log.
 - You have seen no values, so do not put specific IPs, users, identifiers or dates in the SQL. Use aggregations, ranks, \
 ratios, time buckets and distributions that reveal anomalies by themselves.
 - Keep each result small: aggregate and use ORDER BY with LIMIT of at most 50 rows.
 - Cover different lines of investigation (volume and rhythm, breadth and enumeration, failures versus successes, \
 concentration by actor or resource, automation signs, first-seen behaviour) and only those the available columns allow.
+
+TIME ZONE
+- <timezone> states how the file's times were interpreted and overrides any older statement about the zone inside \
+<data_profile>. If its status is declared or in_data, do not ask the analyst which zone the times are in. If it is declared \
+but not verified, every hypothesis or question that depends on local hours must say it rests on that assumption.
 
 RULES FOR HYPOTHESES
 - Each query is a falsifiable hypothesis. expected_if_true and refuted_if must name a concrete, measurable result of THIS \

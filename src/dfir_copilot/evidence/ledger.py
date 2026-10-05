@@ -168,6 +168,9 @@ class Ledger:
                     "mapping_sha256": m["mapping"]["sha256"],
                     "timezone_assumed": m["timezone"]["assumed"],
                     "timezone_verified": m["timezone"]["verified"],
+                    # procedencia (in_data | declared | default) y quién/cuándo; .get: manifiestos anteriores no los tienen
+                    "timezone_source": m["timezone"].get("source"),
+                    "timezone_note": m["timezone"].get("note"),
                     "time_range_utc": m["time_range_utc"],
                 },
                 "ingest_warnings": m.get("warnings", []),

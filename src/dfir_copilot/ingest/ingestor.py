@@ -7,6 +7,7 @@ perfilador (`profiling.readers`), así que lo que se perfiló es lo que se ingie
 from __future__ import annotations
 
 import difflib
+import functools
 import hashlib
 import json
 import re
@@ -31,6 +32,18 @@ _ROLES = ("actor", "resource")  # qué columna es quién actúa y sobre qué (ve
 FORMATS = ("auto", "csv", "tsv", "json", "parquet")
 TIMESTAMP_SPECIAL = ("iso8601", "epoch_s", "epoch_ms", "native")
 _NESTED_KINDS = ("STRUCT", "MAP")
+# Zona horaria (ver `check_timezone` y docs/zona_horaria.md)
+TIMESTAMP_KEYS = ("format", "timezone", "timezone_verified", "timezone_in_data", "timezone_source", "timezone_note",
+                  "timezone_fixed_offset")
+TIMEZONE_SOURCES = ("in_data", "declared", "default")
+_UTC_LIKE = {"UTC", "Etc/UTC", "Etc/UCT", "UCT", "GMT", "Etc/GMT", "Etc/GMT0", "Etc/GMT+0", "Etc/GMT-0", "GMT0", "Etc/Zulu",
+             "Zulu", "Etc/Universal", "Universal", "Etc/Greenwich", "Greenwich"}
+# Desfases fijos con aspecto de región: EST es -05:00 TODO el año (Nueva York es America/New_York); en Etc/GMT el signo va
+# al revés (Etc/GMT+3 = UTC-03:00). Se rechazan salvo `timezone_fixed_offset: true`.
+_FIXED_OFFSET = re.compile(r"^(?:Etc/GMT[+-]\d{1,2}|EST|MST|HST)$")
+_ETC_SIGN = re.compile(r"^Etc/GMT([+-])(\d{1,2})$")
+# Ventanas en las que una hora local puede repetirse o no existir: las transiciones reales son de 30 min, 1 h o 2 h.
+_DST_STEPS = ("30 MINUTE", "1 HOUR", "2 HOUR")
 
 
 class OutputCollision(FileExistsError):
@@ -69,6 +82,102 @@ def _check_regex(name: str, regex: str) -> None:
         raise ValueError(f"'{name}': la regex necesita un grupo de captura, p. ej. 'clave=([^&]+)'")
 
 
+@functools.cache
+def _timezone_names() -> dict[str, str]:
+    """Zonas que conoce ESTE DuckDB (la misma base que convierte): minúsculas -> escritura exacta."""
+    con = duckdb.connect()
+    try:
+        return {r[0].lower(): r[0] for r in con.execute("SELECT name FROM pg_timezone_names()").fetchall()}
+    finally:
+        con.close()
+
+
+def check_timezone(name, *, fixed_offset_ok: bool = False) -> str:
+    """Valida un nombre de zona y lo devuelve. Falla pronto y con una sugerencia, no tras leer todo el archivo.
+
+    Se exige la escritura exacta (DuckDB también acepta 'america/santiago' o 'UTC-3', pero dos mappings del mismo caso no
+    deben escribir la misma zona de dos formas, y 'UTC-3' es un desfase fijo disfrazado).
+    """
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError(t("ingest.err.ts_type", name="timezone", expected="IANA name, e.g. America/Santiago"))
+    names = _timezone_names()
+    if name not in names.values():
+        exact = names.get(name.strip().lower())
+        options = [exact] if exact else difflib.get_close_matches(name, list(names.values()), n=3, cutoff=0.6)
+        hint = t("ingest.err.tz_hint", options=", ".join(options)) if options else ""
+        raise ValueError(t("ingest.err.tz_unknown", tz=name, hint=hint))
+    if _FIXED_OFFSET.match(name) and not fixed_offset_ok:
+        sign = _ETC_SIGN.match(name)
+        detail = t("ingest.err.tz_sign", tz=name, offset=("-" if sign.group(1) == "+" else "+") + sign.group(2)) if sign else ""
+        raise ValueError(t("ingest.err.tz_fixed", tz=name, sign=detail))
+    return name
+
+
+def carries_own_zone(ts: dict, source_type: str | None = None) -> bool:
+    """¿El dato trae su propia zona? Entonces `timezone` no se aplica (epoch es UTC por definición)."""
+    fmt = ts["format"]
+    if fmt in ("epoch_s", "epoch_ms") or "%z" in fmt:
+        return True
+    if fmt == "iso8601":
+        return bool(ts.get("timezone_in_data"))
+    if fmt == "native":
+        return source_type == "TIMESTAMP WITH TIME ZONE"
+    return False
+
+
+def timezone_source(ts: dict, source_type: str | None = None) -> str:
+    """Procedencia de la zona: la declarada en el mapping o, si no se dice, la que se deduce de él."""
+    if ts.get("timezone_source"):
+        return ts["timezone_source"]
+    if carries_own_zone(ts, source_type):
+        return "in_data"
+    if ts.get("timezone", "UTC") != "UTC" or ts.get("timezone_verified"):
+        return "declared"
+    return "default"
+
+
+def local_timezone(tz: dict | None, *, from_manifest: bool = True) -> str | None:
+    """Zona en la que tiene sentido hablar de "hora local" del archivo, o None.
+
+    Solo cuando alguien la DECLARÓ y se aplicó: con la zona en el dato no se sabe cuál es la local del cliente (cada valor
+    trae su desfase) y con UTC por defecto la hora local sería UTC disfrazada. Acepta el bloque `timezone` del manifiesto
+    (`from_manifest=True`, también los anteriores a 5a) o el bloque `timestamp` de un mapping.
+    """
+    if not tz:
+        return None
+    if from_manifest:
+        name, applied = tz.get("assumed", "UTC"), tz.get("applied", True)
+        source = tz.get("source") or ("declared" if name != "UTC" else "default")
+    else:
+        name, applied, source = tz.get("timezone", "UTC"), not carries_own_zone(tz), timezone_source(tz)
+    if not applied or source != "declared" or name in _UTC_LIKE:
+        return None
+    return name
+
+
+def _validate_timestamp(ts: dict) -> None:
+    unknown = sorted(set(ts) - set(TIMESTAMP_KEYS))
+    if unknown:  # una errata como `timezone_verifed` se ignoraba en silencio y dejaba la zona sin verificar
+        raise ValueError(t("ingest.err.ts_keys", keys=", ".join(unknown), valid=", ".join(TIMESTAMP_KEYS)))
+    for key in ("timezone_verified", "timezone_in_data", "timezone_fixed_offset"):
+        if key in ts and not isinstance(ts[key], bool):
+            raise ValueError(t("ingest.err.ts_type", name=key, expected="true | false"))
+    if "timezone_note" in ts and not isinstance(ts["timezone_note"], str):
+        raise ValueError(t("ingest.err.ts_type", name="timezone_note", expected="string"))
+    check_timezone(ts.get("timezone", "UTC"), fixed_offset_ok=bool(ts.get("timezone_fixed_offset")))
+    source = ts.get("timezone_source")
+    if source is None:
+        return
+    if source not in TIMEZONE_SOURCES:
+        raise ValueError(t("ingest.err.ts_type", name="timezone_source", expected=" | ".join(TIMEZONE_SOURCES)))
+    if source == "in_data" and ts["format"] != "native" and not carries_own_zone(ts):
+        raise ValueError(t("ingest.err.tz_source", source=source, reason=t("ingest.err.tz_source_in_data", fmt=ts["format"])))
+    if source == "declared" and carries_own_zone(ts):
+        raise ValueError(t("ingest.err.tz_source", source=source, reason=t("ingest.err.tz_source_declared", fmt=ts["format"])))
+    if source == "default" and (ts.get("timezone", "UTC") != "UTC" or ts.get("timezone_verified")):
+        raise ValueError(t("ingest.err.tz_source", source=source, reason=t("ingest.err.tz_source_default")))
+
+
 def _validate(m: dict) -> None:
     for key in ("source", "format", "fields", "timestamp"):
         if key not in m:
@@ -90,6 +199,7 @@ def _validate(m: dict) -> None:
     ts = m["timestamp"]
     if not isinstance(ts, dict) or "format" not in ts:
         raise ValueError("timestamp requiere 'format' (strptime, o: " + ", ".join(TIMESTAMP_SPECIAL) + ")")
+    _validate_timestamp(ts)
     roles = m.get("roles")
     if roles is not None:
         if not isinstance(roles, dict):
@@ -165,6 +275,37 @@ def _timestamp_expr(expr: str, source_type: str, ts: dict) -> str:
     src = es_to_en_months(v) if "%b" in fmt else v  # meses en español: ene, abr, ago, dic…
     parsed = f"try_strptime({src}, {_lit(fmt)})"
     return parsed if "%z" in fmt else f"({parsed} AT TIME ZONE {_lit(tz)})"
+
+
+def _naive_expr(raw: str, ts: dict) -> str | None:
+    """Hora local SIN zona tal como venía en el archivo, a partir de `timestamp_raw` (None si no aplica)."""
+    fmt = ts["format"]
+    if fmt in ("iso8601", "native"):
+        return f"TRY_CAST({raw} AS TIMESTAMP)"
+    if fmt in ("epoch_s", "epoch_ms") or "%z" in fmt:
+        return None
+    src = es_to_en_months(raw) if "%b" in fmt else raw
+    return f"try_strptime({src}, {_lit(fmt)})"
+
+
+def _dst_counts(con, pq: str, ts: dict) -> tuple[int, int]:
+    """Filas cuya hora local no existe (el reloj se adelantó) o se repite (se atrasó) en la zona aplicada.
+
+    DuckDB las resuelve sin avisar: una hora repetida se lee como su segunda ocurrencia y una inexistente se desplaza. Aquí
+    se cuentan comparando la hora local original con la que resulta de convertir de vuelta. Un prefiltro limita las
+    comprobaciones caras a las filas cercanas a un cambio de horario (4,5 M de filas: unos 7 s; con UTC no se ejecuta).
+    """
+    naive = _naive_expr("timestamp_raw", ts)
+    tz = _lit(ts["timezone"])
+    near_others = " OR ".join(f"timezone({tz}, u {op} INTERVAL {step}) = n" for step in _DST_STEPS for op in "-+")
+    row = con.execute(f"""
+        WITH t AS (SELECT timestamp_utc AS u, {naive} AS n FROM {pq} WHERE timestamp_utc IS NOT NULL),
+        near AS (SELECT u, n, timezone({tz}, u) AS l FROM t
+                 WHERE n IS NOT NULL AND (timezone({tz}, u) <> n
+                       OR timezone({tz}, u + INTERVAL 2 HOUR) - timezone({tz}, u - INTERVAL 2 HOUR) <> INTERVAL 4 HOUR))
+        SELECT count(*) FILTER (WHERE l <> n), count(*) FILTER (WHERE l = n AND ({near_others})) FROM near
+    """).fetchone()
+    return int(row[0]), int(row[1])
 
 
 def _derived_expr(spec: dict, dtype: str, base: dict) -> str:
@@ -293,7 +434,9 @@ def ingest_file(
     spec, rows_in, _notes = open_source(con, in_path, fmt=fmt)
     while True:  # un JSON puede cambiar de tipo después de la muestra con que se infirió el esquema
         rel = relation_sql(spec, explicit=True)
-        query = build_query(mapping, rel, leaf_exprs(con, rel))
+        leaves = leaf_exprs(con, rel)
+        ts_type = leaves.get(mapping["fields"]["timestamp"], (None, None))[1]
+        query = build_query(mapping, rel, leaves)
         try:
             con.execute(f"COPY ({query}) TO {_lit(str(parquet_path))} (FORMAT PARQUET, COMPRESSION ZSTD)")
             break
@@ -313,16 +456,29 @@ def ingest_file(
     ).fetchone()
     rows_out, ts_min, ts_max, *null_list = row
     null_counts = dict(zip(cols, null_list, strict=True))
+    tz_cfg = mapping["timestamp"]
+    tz_name = tz_cfg.get("timezone", "UTC")
+    applied = not carries_own_zone(tz_cfg, ts_type)
+    dst = None
+    if applied and tz_name not in _UTC_LIKE and not _FIXED_OFFSET.match(tz_name) and _naive_expr("x", tz_cfg):
+        dst = _dst_counts(con, pq, tz_cfg)
     con.close()
 
-    tz_cfg = mapping["timestamp"]
+    tz_source = timezone_source(tz_cfg, ts_type)
+    verified = bool(tz_cfg.get("timezone_verified", False)) or tz_source == "in_data"
     warnings = []
     if rows_in != rows_out:
         warnings.append(f"Filas de entrada ({rows_in}) distintas de salida ({rows_out})")
     if null_counts["timestamp_utc"]:
         warnings.append(f"{null_counts['timestamp_utc']} filas con timestamp no interpretable")
-    if not tz_cfg.get("timezone_verified", False):
-        warnings.append(f"Zona horaria NO verificada: se asumió {tz_cfg.get('timezone', 'UTC')}")
+    if not verified:
+        warnings.append(t("ingest.warn.tz_unverified", tz=tz_name))
+    if not applied and tz_name != "UTC":
+        warnings.append(t("ingest.warn.tz_ignored", tz=tz_name, fmt=tz_cfg["format"]))
+    if dst and dst[0]:
+        warnings.append(t("ingest.warn.dst_nonexistent", rows=f"{dst[0]:,}", tz=tz_name))
+    if dst and dst[1]:
+        warnings.append(t("ingest.warn.dst_ambiguous", rows=f"{dst[1]:,}", tz=tz_name))
     for name in mapping.get("derived", {}):
         if rows_out and null_counts.get(name) == rows_out:
             warnings.append(t("ingest.warn.derived_empty", name=name))
@@ -350,8 +506,13 @@ def ingest_file(
         "mapping": {"path": mapping["_path"], "sha256": mapping["_sha256"]},
         "roles": mapping.get("roles"),  # qué columnas son actor y recurso para los detectores
         "timezone": {
-            "assumed": tz_cfg.get("timezone", "UTC"),
-            "verified": bool(tz_cfg.get("timezone_verified", False)),
+            "assumed": tz_name,
+            "verified": verified,
+            "source": tz_source,  # in_data | declared | default
+            "note": tz_cfg.get("timezone_note"),  # quién la declaró o confirmó, y cuándo
+            "applied": applied,  # False si el dato trae su propia zona y la declarada no se usó
+            "dst_nonexistent_rows": dst[0] if dst else None,  # None: no se comprobó (UTC, desfase fijo o zona en el dato)
+            "dst_ambiguous_rows": dst[1] if dst else None,
         },
         "time_range_utc": [ts_min, ts_max],
         "null_counts": null_counts,
@@ -366,5 +527,6 @@ def ingest_csv(csv_path: str | Path, *args, **kwargs) -> dict:
     return ingest_file(csv_path, *args, **kwargs)
 
 
-__all__ = ["FORMATS", "MAPPINGS_DIR", "OutputCollision", "SourceError", "build_query", "ingest_csv", "ingest_file",
-           "load_mapping", "sha256_file"]
+__all__ = ["FORMATS", "MAPPINGS_DIR", "TIMESTAMP_KEYS", "TIMEZONE_SOURCES", "OutputCollision", "SourceError", "build_query",
+           "carries_own_zone", "check_timezone", "ingest_csv", "ingest_file", "load_mapping", "local_timezone", "sha256_file",
+           "timezone_source"]

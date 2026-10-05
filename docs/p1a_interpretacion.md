@@ -90,6 +90,7 @@ se hicieron siempre con el mismo prompt.
 |---|---|
 | `p1a-1` | Primera llamada real |
 | `p1a-2` | Vocabulario de mapeo (`<canonical_names>`) y traducción perfilador→tabla |
+| `p1a-3` | Zona horaria: bloque `<timezone>`, columna `timestamp_local` y cuándo no preguntar por la zona |
 
 ## Tokens y espera
 
@@ -109,5 +110,7 @@ python -m dfir_copilot.interpret.smoke /workspace/data/raw/three_months.csv --dr
 python -m dfir_copilot.interpret.smoke /workspace/data/raw/three_months.csv \
     --save /workspace/data/interpretaciones/three_months_p1a.json                              # llamada real
 ```
+
+Con zona declarada (ver `docs/zona_horaria.md`): `--tz America/Santiago --tz-note "quién y cuándo"`. La nota queda en el borrador y nunca se envía al modelo.
 
 Códigos de salida: 0 correcto, 1 falló la llamada, 2 configuración o entrada inválida, 3 respuesta inutilizable.

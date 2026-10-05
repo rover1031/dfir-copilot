@@ -31,10 +31,10 @@ def _default_llm_factory(cfg: LLMConfig):
     return LangChainStructured(make_llm(cfg))
 
 
-def _default_inspector(path, lang):
+def _default_inspector(path, lang, **timezone):
     from dfir_copilot.profiling.inspector import inspect_source
 
-    return inspect_source(path, lang=lang)
+    return inspect_source(path, lang=lang, **timezone)
 
 
 def main(argv=None, *, inspector=None, llm_factory=None, input_fn=input) -> int:
@@ -45,18 +45,24 @@ def main(argv=None, *, inspector=None, llm_factory=None, input_fn=input) -> int:
     ap.add_argument("--yes", action="store_true", help="no pedir confirmación antes de enviar")
     ap.add_argument("--timeout", type=float, default=None, help="segundos de espera de la API (por defecto, el mayor entre LLM_TIMEOUT_S y 180)")
     ap.add_argument("--save", metavar="ARCHIVO.json", help="guarda el resultado (sin el perfil enviado)")
+    ap.add_argument("--tz", metavar="ZONA", help="zona de las horas del archivo si no la traen, p. ej. America/Santiago")
+    ap.add_argument("--tz-note", metavar="TEXTO", help="quién declaró la zona y cuándo (queda en el borrador, no se envía)")
     args = ap.parse_args(argv)
 
     print(f"Perfilando en local: {Path(args.path).name} ...")
     try:
-        draft = (inspector or _default_inspector)(args.path, args.lang)
+        if args.tz_note and not args.tz:
+            raise ValueError("--tz-note solo tiene sentido junto con --tz")
+        tz_kwargs = {k: v for k, v in (("timezone", args.tz), ("timezone_note", args.tz_note)) if v}
+        draft = (inspector or _default_inspector)(args.path, args.lang, **tz_kwargs)
         profile = getattr(draft, "profile", None)
         if profile is None:
             print(f"El Inspector no produjo un perfil (estado: {getattr(draft, 'status', 'desconocido')}).")
             return 2
         derived = list(draft.derived)
-        columns = columns_for(profile, derived)
-        user = build_user_message(profile, derived, columns, args.lang)
+        timestamp = (getattr(draft, "mapping", None) or {}).get("timestamp")
+        columns = columns_for(profile, derived, timestamp)
+        user = build_user_message(profile, derived, columns, args.lang, timestamp)
     except (OSError, ValueError) as exc:
         print(f"No se pudo preparar el mensaje ({type(exc).__name__}): {str(exc)[:300]}")
         return 2
@@ -86,7 +92,7 @@ def main(argv=None, *, inspector=None, llm_factory=None, input_fn=input) -> int:
         return 0
 
     try:
-        result = interpret_profile(llm, profile, derived=derived, lang=args.lang)
+        result = interpret_profile(llm, profile, derived=derived, lang=args.lang, timestamp=timestamp)
     except Exception as exc:  # noqa: BLE001 - se muestra el tipo y un resumen, nunca la clave
         print(f"La llamada falló ({type(exc).__name__}): {str(exc)[:300]}")
         return 1

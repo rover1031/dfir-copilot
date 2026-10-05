@@ -87,7 +87,9 @@ class MappingDraft:
         for canon, col in self.mapping["fields"].items():
             lines.append(f"  {canon:14} <- {col}")
         ts = self.mapping["timestamp"]
-        lines.append(f"  {'timestamp.fmt':14} :  {ts['format']}  (tz {ts.get('timezone')}, verified={ts.get('timezone_verified')})")
+        origin = f", {ts['timezone_source']}" if ts.get("timezone_source") else ""
+        lines.append(f"  {'timestamp.fmt':14} :  {ts['format']}  (tz {ts.get('timezone')}{origin}, "
+                     f"verified={ts.get('timezone_verified')})")
         lines += ["", t("inspector.render.derived", lang)]
         if not self.derived:
             lines.append("  " + t("inspector.render.none", lang))
@@ -125,8 +127,9 @@ def _dump_yaml(d: MappingDraft) -> str:
     out += [f"  {canon}: {_y(col)}" for canon, col in m["fields"].items()]
     ts = m["timestamp"]
     out += ["", "timestamp:", f"  format: {_y(ts['format'])}", f"  timezone: {_y(ts['timezone'])}"]
-    if "timezone_in_data" in ts:
-        out.append(f"  timezone_in_data: {_y(ts['timezone_in_data'])}")
+    for key in ("timezone_source", "timezone_note", "timezone_fixed_offset", "timezone_in_data"):
+        if key in ts:
+            out.append(f"  {key}: {_y(ts[key])}")
     note = "" if ts["timezone_verified"] else f"   # {t('inspector.yaml.tz_unverified', lang)}"
     out.append(f"  timezone_verified: {_y(ts['timezone_verified'])}{note}")
     if m.get("derived"):
@@ -280,10 +283,23 @@ def _full_stats(con, proposals: list, lang: str) -> tuple[list, list]:
 # --- orquestación --------------------------------------------------------------------------------------------------
 def inspect_source(path: str | Path, *, lang: str | None = None, profile: DataProfile | None = None,
                    source_name: str | None = None, sample_rows: int = 20_000,
-                   mapper: SchemaMapper | None = None) -> MappingDraft:
-    """Genera un borrador de mapping para `path`. No ingiere nada ni modifica el archivo."""
-    from dfir_copilot.ingest.ingestor import _validate  # import tardío: el ingestor importa este paquete
+                   mapper: SchemaMapper | None = None, timezone: str | None = None,
+                   timezone_note: str | None = None, timezone_fixed_offset: bool = False) -> MappingDraft:
+    """Genera un borrador de mapping para `path`. No ingiere nada ni modifica el archivo.
 
+    `timezone`: zona en que está la hora del archivo si el dato no la trae (nombre IANA, p. ej. 'America/Santiago'). Queda
+    como declarada por el analista y SIN verificar; `timezone_note` registra quién la dio y cuándo. Se valida antes de
+    perfilar, así una errata falla al instante y no tras leer el archivo.
+    """
+    from dfir_copilot.ingest.ingestor import (  # import tardío: el ingestor importa este paquete
+        _validate,
+        check_timezone,
+    )
+
+    if timezone is not None:
+        check_timezone(timezone, fixed_offset_ok=timezone_fixed_offset)
+    elif timezone_note is not None or timezone_fixed_offset:
+        raise ValueError("timezone_note y timezone_fixed_offset solo tienen sentido junto con timezone")
     lang = resolve_lang(lang)
     path = Path(path)
     mapper = mapper or SchemaMapper()
@@ -321,11 +337,23 @@ def inspect_source(path: str | Path, *, lang: str | None = None, profile: DataPr
     else:
         fields["timestamp"] = tsc.field
         fmt = "native" if tsc.format.startswith("native:") else tsc.format
-        verified = bool(tsc.timezone_in_data)
-        ts = {"format": fmt, "timezone": "UTC", "timezone_verified": verified}
+        in_data = bool(tsc.timezone_in_data)
+        ts = {"format": fmt, "timezone": "UTC", "timezone_verified": in_data}
         if fmt == "iso8601":
-            ts["timezone_in_data"] = bool(tsc.timezone_in_data)
-        if not verified:
+            ts["timezone_in_data"] = in_data
+        if in_data:  # la zona viaja en cada valor: nada que declarar ni verificar
+            if timezone is not None:
+                decisions.append(Decision("timezone_ignored", "review", t(
+                    "decision.timezone_ignored", lang, tz=timezone, field=tsc.field), tsc.field))
+        elif timezone is not None:
+            ts.update({"timezone": timezone, "timezone_source": "declared"})
+            if timezone_note:
+                ts["timezone_note"] = timezone_note
+            if timezone_fixed_offset:
+                ts["timezone_fixed_offset"] = True
+            decisions.append(Decision("timezone_declared", "review", t(
+                "decision.timezone_declared", lang, field=tsc.field, tz=timezone), tsc.field))
+        else:
             decisions.append(Decision("timezone_unverified", "review", t(
                 "decision.timezone_unverified", lang, field=tsc.field, tz="UTC"), tsc.field))
         for w in profile.warnings:

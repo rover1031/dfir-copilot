@@ -39,16 +39,20 @@ def interpret_profile(
     derived: Iterable = (),
     lang: str | None = None,
     sandbox: SqlSandbox | None = None,
+    timestamp: dict | None = None,
 ) -> InterpretationResult:
     """Envía el perfil (y los metadatos de las derivadas del Inspector) y devuelve la interpretación ya revisada.
+
+    `timestamp`: el bloque `timestamp` del mapping (p. ej. `borrador.mapping["timestamp"]`). Con él, el modelo sabe la zona
+    declarada y ve la columna `timestamp_local`; sin él, se le dice que nadie declaró la zona.
 
     No reintenta ni corrige nada por su cuenta: si la respuesta no es utilizable, lo dice con `error`. Los fallos de red o de
     autenticación del proveedor se propagan tal cual.
     """
     derived = list(derived)
     lang = lang or profile.lang
-    columns = columns_for(profile, derived)
-    user = build_user_message(profile, derived, columns, lang)
+    columns = columns_for(profile, derived, timestamp)
+    user = build_user_message(profile, derived, columns, lang, timestamp)
     t0 = time.perf_counter()
     reply = llm.invoke(SYSTEM_PROMPT, user, wire_schema())
     elapsed = int((time.perf_counter() - t0) * 1000)

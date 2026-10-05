@@ -177,7 +177,7 @@ def test_el_esquema_de_respuesta_forma_parte_de_la_estimacion_de_smoke(capsys):
 # --- el texto del prompt y su versión van juntos -------------------------------------------------------------------
 # Si cambias SYSTEM_PROMPT, este test falla: sube PROMPT_VERSION y registra aquí la huella nueva. Así dos resultados con la
 # misma versión se hicieron siempre con el mismo prompt y comparar versiones tiene sentido.
-PROMPT_FINGERPRINTS = {"p1a-2": "8f59e01f4845"}
+PROMPT_FINGERPRINTS = {"p1a-2": "8f59e01f4845", "p1a-3": "5f0c06900a3c"}  # historial: cada versión, su texto
 
 
 def test_el_texto_del_prompt_coincide_con_la_version_registrada():

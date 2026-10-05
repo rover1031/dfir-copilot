@@ -104,7 +104,10 @@ class LogProfiler:
         """Serie temporal de peticiones (el motor devuelve como máximo `max_rows` periodos)."""
         if bucket not in _BUCKETS:
             raise ValueError(f"bucket debe ser uno de {_BUCKETS}")
+        # Con zona declarada, días, semanas y meses se cortan en la medianoche DEL CLIENTE (columna periodo_local); sin ella,
+        # en la de UTC (periodo). El nombre de la columna dice cuál es, para que nadie lea una como la otra.
+        col, label = ("timestamp_local", "periodo_local") if "timestamp_local" in self.columns else ("timestamp_utc", "periodo")
         return self.engine.query(
-            f"SELECT date_trunc('{bucket}', timestamp_utc) AS periodo, count(*) AS peticiones "
+            f"SELECT date_trunc('{bucket}', {col}) AS {label}, count(*) AS peticiones "
             f"FROM logs{self._where(filters)} GROUP BY 1 ORDER BY 1"
         )

@@ -43,7 +43,7 @@ def test_una_derivada_con_tipo_no_admitido_se_rechaza():
 def test_el_mensaje_lleva_idioma_columnas_y_el_perfil_tal_cual():
     profile = make_profile()
     msg = build_user_message(profile, [USER, INVOICE], columns_for(profile, [USER, INVOICE]), "es")
-    assert msg.startswith("<lang>es</lang>\n<canonical_names>") and "\n<columns>\n" in msg and f"<data_profile>\n{profile.to_llm_json()}\n</data_profile>" in msg
+    assert msg.startswith("<lang>es</lang>\n<timezone>status: not_declared") and "\n<canonical_names>" in msg and "\n<columns>\n" in msg and f"<data_profile>\n{profile.to_llm_json()}\n</data_profile>" in msg
     assert "x_invoice_id VARCHAR - derived from URL parameter 'invoice_id'; role=resource; present in 99.9% of rows; 5025 distinct values" in msg
     assert "user_id VARCHAR - derived from URL parameter 'authtoken' (canonical column); role=canonical" in msg
     assert "endpoint VARCHAR - Ruta sin query string" in msg

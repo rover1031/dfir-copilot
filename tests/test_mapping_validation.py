@@ -103,7 +103,9 @@ def test_la_zona_horaria_del_mapping_se_aplica_al_convertir_a_utc(mappings, tmp_
     con.execute("SET TimeZone = 'UTC'")
     (ts,) = con.execute(f"SELECT CAST(timestamp_utc AS VARCHAR) FROM '{manifest['output']['path']}'").fetchone()
     assert ts == "2020-12-01 05:16:00+00"
-    assert manifest["timezone"] == {"assumed": "America/Bogota", "verified": True}
+    # Contrato ampliado en P1-a/5a: procedencia, nota, si se aplicó y el conteo de horas ambiguas o inexistentes.
+    assert manifest["timezone"] == {"assumed": "America/Bogota", "verified": True, "source": "declared", "note": None,
+                                    "applied": True, "dst_nonexistent_rows": 0, "dst_ambiguous_rows": 0}
     assert not any("Zona horaria" in w for w in manifest["warnings"])  # verificada: sin advertencia
 
 

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import duckdb
 
-from dfir_copilot.ingest.ingestor import sha256_file
+from dfir_copilot.ingest.ingestor import local_timezone, sha256_file
 
 
 class QueryRejected(ValueError):
@@ -89,6 +89,9 @@ class QueryEngine:
             if self.parquet_sha256 != self.manifest["output"]["sha256"]:
                 raise ValueError("El hash del Parquet no coincide con el manifiesto: dataset alterado")
         self.dataset_sha256 = self.manifest["input"]["sha256"] if self.manifest else "no-verificado"
+        # Hora local del cliente, solo si alguien declaró la zona (ver `ingestor.local_timezone`). No cambia el Parquet ni
+        # su hash: es una columna calculada en la vista, así que un caso ya sellado la obtiene sin reingerir.
+        self.local_timezone = local_timezone((self.manifest or {}).get("timezone"))
         self.max_rows = max_rows
         self.timeout_s = timeout_s
         self.history: list[dict] = []
@@ -101,8 +104,10 @@ class QueryEngine:
         con.execute(f"SET memory_limit = {_lit(memory_limit)}")
         con.execute(f"SET temp_directory = {_lit(str(tmp))}")
         con.execute("SET max_temp_directory_size = '10GB'")
+        local = (f", timezone({_lit(self.local_timezone)}, timestamp_utc) AS timestamp_local"
+                 if self.local_timezone else "")
         con.execute(
-            f"CREATE VIEW {self.VIEW} AS SELECT * FROM read_parquet({_lit(str(self.parquet))})"
+            f"CREATE VIEW {self.VIEW} AS SELECT *{local} FROM read_parquet({_lit(str(self.parquet))})"
         )
         # Bloqueo: sin acceso a archivos ni red salvo el Parquet, y configuración inmutable.
         con.execute(f"SET allowed_paths = [{_lit(str(self.parquet))}]")
@@ -151,7 +156,8 @@ class QueryEngine:
         """
         base = f"SELECT * FROM ({text}) AS q"
         described = self._con.execute(f"DESCRIBE {base}").fetchall()
-        tz_cols = [name for name, dtype, *_ in described if dtype == "TIMESTAMP WITH TIME ZONE"]
+        # TIMESTAMP (sin zona, p. ej. timestamp_local) también como texto: valores serializables y sin ambigüedad de zona
+        tz_cols = [name for name, dtype, *_ in described if dtype in ("TIMESTAMP WITH TIME ZONE", "TIMESTAMP")]
         replace = ""
         if tz_cols:
             items = ", ".join(
