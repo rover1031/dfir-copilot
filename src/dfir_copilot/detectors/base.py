@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 from dfir_copilot.engine.query_engine import QueryEngine
 
@@ -23,6 +23,7 @@ class Finding:
     metrics: dict
     evidence: tuple = ()  # entradas de engine.history; las completa run_detectors
     mitre: tuple = ()
+    related: dict = field(default_factory=dict)  # {columna: [valores]} de entidades asociadas
 
     def __post_init__(self):
         if self.severity not in SEVERITIES:
