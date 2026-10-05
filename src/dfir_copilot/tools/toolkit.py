@@ -61,6 +61,7 @@ class Toolkit:
     def __init__(self, engine, ledger=None, limits: ToolLimits = ToolLimits()):
         self.engine, self.ledger, self.limits = engine, ledger, limits
         self.profiler = CanonicalProfiler(engine)
+        self._copy_recorded = False
         self._roles = None  # se resuelven la primera vez que hacen falta (no cambian durante el hilo)
         self._tools = {
             "describe_dataset": (NoArgs, self._describe,
@@ -84,8 +85,18 @@ class Toolkit:
     def specs(self) -> list[dict]:
         return [{"name": n, "description": d, "schema": m.model_json_schema()} for n, (m, _, d) in self._tools.items()]
 
+    def register_copy(self) -> bool:
+        """Deja constancia en el ledger de la copia que consulta este toolkit (idempotente). Un error aquí es de configuración
+        (otra política, un Parquet reconstruido) y se propaga: no es algo que deba ver el modelo como error de herramienta."""
+        if self.ledger is not None and not self._copy_recorded:
+            self.ledger.record_copy(self.engine)
+            self._copy_recorded = True
+            return True
+        return False
+
     # --- punto de entrada único ---------------------------------------------------------
     def call(self, name: str, args: dict | None = None) -> ToolOutput:
+        self.register_copy()  # antes de cualquier consulta: el ledger exige conocer la copia a la que se refiere cada una
         start = len(self.engine.history)
         if name not in self._tools:
             return self._fail(name, args, start, f"herramienta desconocida: {name}. Disponibles: {sorted(self._tools)}")
@@ -112,12 +123,20 @@ class Toolkit:
         rows = m.get("output", {}).get("rows")
         empty = [c for c, n in m.get("null_counts", {}).items() if rows and n == rows]
         ov = self.profiler.overview(actor=self.roles.actor)
+        privacy = {}
+        if self.engine.copy_kind == "pseudonymized":
+            policy = m.get("policy") or {}
+            privacy = {"privacy": {"copy_id": self.engine.copy_id, "policy": policy.get("version"),
+                                   "overrides": policy.get("overrides") or {},
+                                   "treatments": {c: k for c, k in (m.get("treatments") or {}).items() if c not in empty}}}
         return {
+            **privacy,
             "dataset_sha256": self.engine.dataset_sha256,
             "columns": dict(self.profiler.columns),
             "columns_without_data": empty,
             "overview": dict(zip(ov.columns, ov.rows[0], strict=True)),
-            "timezone": m.get("timezone", {}),
+            # sin `note`: es texto libre del analista (quién la declaró y cuándo); P1-a ya decidió no enviarlo nunca al modelo
+            "timezone": {k: v for k, v in (m.get("timezone") or {}).items() if k != "note"},
             "roles": self.roles.as_record(),
             "detectors": available(),
         }
@@ -228,6 +247,6 @@ class Toolkit:
             return
         queries = self.engine.history[start:]
         self.ledger.record_queries(queries)
-        self.ledger.append("tool_call", {"tool": name, "args": args or {}, "ok": ok,
+        self.ledger.append("tool_call", {"tool": name, "args": args or {}, "ok": ok, "copy": self.engine.copy_id,
                                          "query_ids": [query_id(q) for q in queries],
                                          "injection_warnings": list(warnings)})

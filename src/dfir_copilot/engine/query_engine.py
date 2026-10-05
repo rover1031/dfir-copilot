@@ -89,6 +89,11 @@ class QueryEngine:
             if self.parquet_sha256 != self.manifest["output"]["sha256"]:
                 raise ValueError("El hash del Parquet no coincide con el manifiesto: dataset alterado")
         self.dataset_sha256 = self.manifest["input"]["sha256"] if self.manifest else "no-verificado"
+        # Qué copia de los datos consulta este motor. La copia seudonimizada comparte `dataset_sha256` con la real (es el mismo
+        # archivo de origen), así que ese hash NO las distingue: la identidad de la copia es la del Parquet que se abre.
+        self.copy_kind = "pseudonymized" if (self.manifest or {}).get("kind") == "pseudonymized" else "real"
+        claimed = ((self.manifest or {}).get("output") or {}).get("sha256")
+        self.copy_id = f"{self.copy_kind}:{(self.parquet_sha256 or claimed or 'unverified')[:12]}"
         # Hora local del cliente, solo si alguien declaró la zona (ver `ingestor.local_timezone`). No cambia el Parquet ni
         # su hash: es una columna calculada en la vista, así que un caso ya sellado la obtiene sin reingerir.
         self.local_timezone = local_timezone((self.manifest or {}).get("timezone"))
@@ -143,6 +148,7 @@ class QueryEngine:
                 "elapsed_ms": int((time.perf_counter() - t0) * 1000),
                 "error": error,
                 "dataset_sha256": self.dataset_sha256,
+                "copy": self.copy_id,  # sobre qué copia corrió: dentro del registro, así dos copias con el mismo SQL no comparten id
                 "limit": limit,  # tope de filas con el que se ejecutó: el replay debe usar el mismo
                 "result_sha256": result_sha256,  # huella del resultado (None si hubo error)
             }

@@ -22,6 +22,7 @@ from langgraph.types import Command, interrupt
 from pydantic import BaseModel, Field, ValidationError
 
 from dfir_copilot.agent.hypotheses import DecisionRequest, HypothesisBook, HypothesisError
+from dfir_copilot.privacy import PrivacyError, privacy_context
 from dfir_copilot.tools import Toolkit, ToolLimits
 from dfir_copilot.tools.sanitize import clean_text, render, sanitize
 
@@ -120,9 +121,17 @@ class AgentCrashed(Exception):
 
 class DfirAgent:
     def __init__(self, engine, ledger, llm, *, analyst: str | None = None, max_steps: int = 12,
-                 limits: ToolLimits = ToolLimits()):
+                 limits: ToolLimits = ToolLimits(), allow_real: bool = False):
+        """`engine`: el motor sobre la COPIA SEUDONIMIZADA (`engine, ps = ws.pseudonymized()`); lo que devuelven sus herramientas
+        viaja a un LLM externo. Con datos reales se rechaza salvo `allow_real=True` (datos sintéticos o no sensibles): queda
+        constancia en el ledger, cada turno lleva la copia sobre la que corrió."""
+        if getattr(engine, "copy_kind", "real") == "real" and not allow_real:
+            raise PrivacyError("El agente envía a un LLM externo lo que devuelven sus herramientas y este motor consulta los datos "
+                               "REALES. Usa la copia seudonimizada: `engine, ps = ws.pseudonymized()`. Si los datos son sintéticos "
+                               "o no sensibles, pasa allow_real=True.")
         self.engine, self.ledger, self.llm, self.max_steps = engine, ledger, llm, max_steps
         self.toolkit = Toolkit(engine, ledger, limits)
+        self.toolkit.register_copy()  # falla ya, al construir, si la copia no es la del caso
         self.book = HypothesisBook(ledger)
         opened = ledger.entries("case_opened")
         self.analyst = analyst or (opened[0]["data"].get("analyst") if opened else None) or "analista"
@@ -154,7 +163,7 @@ class DfirAgent:
             f"{self._local_line()}"
             f"- Columnas sin datos: {empty}\n"
         )
-        return SystemMessage(content=SYSTEM_PROMPT + context)
+        return SystemMessage(content=SYSTEM_PROMPT + context + privacy_context(m))
 
     @staticmethod
     def _dst_line(tz: dict) -> str:
@@ -175,10 +184,20 @@ class DfirAgent:
     def hypothesis_context(self) -> str:
         """Estado de las hipótesis. También es texto no confiable (el modelo pudo citar al atacante):
         se sanea para evitar inyección de segundo orden."""
-        items = [{"id": h["hypothesis_id"], "estado": h["status"], "hipotesis": h["statement"],
+        items = [{"id": h["hypothesis_id"], "estado": h["status"], "hipotesis": self._visible_statement(h),
                   "evidencia": h["evidence_refs"]} for h in self.book.all()]
         clean, _ = sanitize(items, max_cell=300)
         return render({"hipotesis_del_caso": clean}) if clean else "(sin hipótesis registradas)"
+
+    def _visible_statement(self, h: dict) -> str:
+        """Con la copia seudonimizada, el texto de una hipótesis solo vuelve al modelo si se formuló sobre ESA misma copia.
+
+        Una hipótesis anterior (escrita cuando el agente veía datos reales, o sobre otra política) puede contener valores que
+        la copia oculta; traducir texto libre es poco fiable (¿ese número es un id o una cifra?), así que se tapa. El id y el
+        estado se conservan; si interesa, se vuelve a formular con alias."""
+        if self.engine.copy_kind == "real" or h.get("copy") == self.engine.copy_id:
+            return h["statement"]
+        return "[texto no mostrado: formulada sobre otra copia de los datos; vuelve a formularla con alias si sigue vigente]"
 
     def briefing(self) -> str:
         """Lo dinámico (estado de las hipótesis) va en el primer mensaje de cada pregunta, no en el prompt."""
@@ -267,7 +286,8 @@ class DfirAgent:
         try:
             parsed = model(**args)
             if name == "propose_hypothesis":
-                item, created = self.book.propose(parsed.statement, parsed.rationale, parsed.test_plan)
+                item, created = self.book.propose(parsed.statement, parsed.rationale, parsed.test_plan,
+                                                  copy=self.engine.copy_id)
                 return reply(ok=True, hypothesis_id=item["hypothesis_id"], estado=item["status"], nueva=created), None
             if parsed.status == "en_prueba":
                 item = self.book.start_testing(parsed.hypothesis_id)
@@ -321,7 +341,7 @@ class DfirAgent:
         except Exception as exc:  # noqa: BLE001 - se audita y se vuelve a lanzar
             self.ledger.append("agent_turn", {
                 "thread_id": thread_id, "question": question, "status": "error", "answer": None,
-                "model": self.model_name, "steps": None, "tokens": None, "approvals": [],
+                "model": self.model_name, "copy": self.engine.copy_id, "steps": None, "tokens": None, "approvals": [],
                 "error": clean_text(f"{type(exc).__name__}: {exc}", 400)})
             raise
         return self._result(thread_id, question)
@@ -376,7 +396,7 @@ class DfirAgent:
         result = AgentResult(status, answer, approvals, values.get("steps", 0), values.get("tokens", 0), thread_id)
         self.ledger.append("agent_turn", {
             "thread_id": thread_id, "question": question, "status": status, "answer": answer, "model": self.model_name,
-            "steps": result.steps, "tokens": result.tokens, "stop_reason": stop,
+            "copy": self.engine.copy_id, "steps": result.steps, "tokens": result.tokens, "stop_reason": stop,
             "approvals": [a["hypothesis_id"] for a in approvals]})
         return result
 

@@ -44,7 +44,7 @@ def setup(tmp_path, make_engine, scripted):
 
     def make(script, **kw):
         llm = scripted(script)
-        return build_agent(engine, ledger, llm, **kw), llm
+        return build_agent(engine, ledger, llm, **{"allow_real": True, **kw}), llm  # datos sintéticos
 
     return make, ledger, engine, truth
 
@@ -149,7 +149,7 @@ def test_una_inyeccion_en_el_log_no_llega_al_modelo(tmp_path, engine_from_rows, 
     engine = engine_from_rows(rows)
     ledger = Ledger.open("I", engine, root=tmp_path / "ledger")
     llm = scripted([call("run_query", sql="SELECT DISTINCT user_agent FROM logs"), say("fin")])
-    build_agent(engine, ledger, llm).ask("¿Qué user agents hay?")
+    build_agent(engine, ledger, llm, allow_real=True).ask("¿Qué user agents hay?")
     seen = tool_text(llm.log[-1]["messages"])
     assert "REDACTADO" in seen and "JUPYTER_TOKEN" not in seen
     assert ledger.entries("tool_call")[0]["data"]["injection_warnings"]

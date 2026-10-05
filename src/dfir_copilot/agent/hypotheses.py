@@ -60,7 +60,9 @@ class HypothesisBook:
         return self._items[hid]
 
     def propose(self, statement: str, rationale: str = "", test_plan: str = "",
-                proposed_by: str = "agent") -> tuple[dict, bool]:
+                proposed_by: str = "agent", copy: str | None = None) -> tuple[dict, bool]:
+        """`copy`: identidad de la copia de datos sobre la que se formula (`engine.copy_id`). El texto de una hipótesis puede
+        llevar valores de ESA copia; el agente solo se lo muestra de vuelta al modelo si sigue consultando la misma."""
         statement = " ".join(statement.split())
         if not 10 <= len(statement) <= 500:
             raise HypothesisError("La hipótesis debe tener entre 10 y 500 caracteres")
@@ -69,6 +71,8 @@ class HypothesisBook:
             return self._items[hid], False
         data = {"hypothesis_id": hid, "statement": statement, "rationale": rationale.strip(),
                 "test_plan": test_plan.strip(), "proposed_by": proposed_by}
+        if copy:
+            data["copy"] = copy
         self.ledger.append("hypothesis", data)
         self._items[hid] = {**data, "status": "propuesta", "evidence_refs": [], "history": []}
         return self._items[hid], True

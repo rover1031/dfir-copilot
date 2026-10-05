@@ -36,6 +36,14 @@ class ParquetMismatch(DatasetMismatch):
     """El Parquet no es el que abrió el caso: se re-ingirió o se alteró."""
 
 
+class CopyMismatch(DatasetMismatch):
+    """La copia seudonimizada no es la que registró el ledger (otra política, otro Parquet de origen o un hash distinto)."""
+
+
+class CopyNotRegistered(Exception):
+    """Una consulta corrió sobre una copia seudonimizada que el ledger no conoce: regístrala antes con `record_copy()`."""
+
+
 class LedgerCorrupt(Exception):
     """La cadena de hashes del ledger no es válida."""
 
@@ -129,6 +137,7 @@ class Ledger:
         self._findings = {x["data"]["finding_id"] for x in e if x["type"] == "finding"}
         self._candidates = {x["data"]["candidate_id"] for x in e if x["type"] == "case_candidate"}
         self._hypotheses = {x["data"]["hypothesis_id"] for x in e if x["type"] == "hypothesis"}
+        self._copies = {x["data"]["copy_id"]: x["data"] for x in e if x["type"] == "data_copy"}
 
     def _sync(self) -> None:
         """Si otra instancia escribió, recarga lo que añadió."""
@@ -147,6 +156,9 @@ class Ledger:
             raise ValueError("case_id solo admite letras, números, '.', '_' y '-' (máx. 64)")
         if engine.manifest is None:
             raise ValueError("El ledger exige un dataset con manifiesto (ingestado con ingest_csv)")
+        if getattr(engine, "copy_kind", "real") != "real":
+            raise ValueError("El ledger se abre con el motor de los datos REALES (es el que lo ata al dataset sellado). La copia "
+                             "seudonimizada se registra aparte: `ledger.record_copy(engine_seudonimizado)`.")
         path = Path(root) / f"{case_id}.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
         ledger = cls(path, engine.dataset_sha256)
@@ -218,14 +230,54 @@ class Ledger:
                 self._size += len((line + "\n").encode("utf-8"))
                 if type_ == "hypothesis":
                     self._hypotheses.add(data["hypothesis_id"])
+                elif type_ == "data_copy":
+                    self._copies[data["copy_id"]] = data
                 return stored
             finally:
                 if fcntl:
                     fcntl.flock(fh, fcntl.LOCK_UN)
 
+    def record_copy(self, engine) -> bool:
+        """Registra la copia seudonimizada sobre la que se consultará: política, tratamientos, hash del Parquet, del diccionario
+        (nunca su contenido) y del Parquet real del que sale. Es idempotente. Devuelve True si escribió.
+
+        Las copias reales no se registran: `case_opened` ya las identifica, y toda consulta anterior a P1-b.2b (sin sello de
+        copia) se considera hecha sobre ellas.
+        """
+        if getattr(engine, "copy_kind", "real") == "real":
+            return False
+        if not engine.verified:
+            raise ValueError("Una copia seudonimizada solo se registra si su Parquet se verificó contra el manifiesto")
+        self._sync()
+        if engine.copy_id in self._copies:
+            return False
+        m = engine.manifest
+        if m["input"]["sha256"] != self.dataset_sha256:
+            raise DatasetMismatch(f"La copia {engine.copy_id} sale de otro archivo de origen que el de este ledger")
+        source = m["source_parquet"]["sha256"]
+        bound = self._entries[0]["data"]["dataset"].get("parquet_sha256") if self._entries else None
+        if bound and source != bound:
+            raise CopyMismatch(f"La copia {engine.copy_id} se construyó desde otro Parquet ({source[:12]}…) que el que abrió el "
+                               f"caso ({bound[:12]}…): se re-ingirió o se alteró después de seudonimizar")
+        self.append("data_copy", {
+            "copy_id": engine.copy_id, "kind": "pseudonymized", "parquet_sha256": engine.parquet_sha256,
+            "source_parquet_sha256": source, "policy": m.get("policy"), "treatments": m.get("treatments"),
+            "aliases_sha256": (m.get("aliases") or {}).get("sha256"), "rows": m["output"]["rows"]})
+        return True
+
+    def copies(self) -> dict[str, dict]:
+        """Copias seudonimizadas registradas (id -> detalle)."""
+        self._sync()
+        return dict(self._copies)
+
     def record_queries(self, queries) -> int:
         """Registra consultas (cualquier estado: las rechazadas también son auditoría). Devuelve cuántas son nuevas."""
         self._sync()
+        queries = list(queries)
+        unknown = sorted({q["copy"] for q in queries if str(q.get("copy", "")).startswith("pseudonymized:")
+                          and q["copy"] not in self._copies})
+        if unknown:  # antes de escribir nada: o entran todas o ninguna
+            raise CopyNotRegistered(f"Consultas sobre copias sin registrar: {unknown}. Llama antes a record_copy(engine).")
         new = 0
         for q in queries:
             qid = query_id(q)
@@ -332,35 +384,66 @@ class Ledger:
         return verify_file(self.path)
 
     def replay(self, engine, record: bool = True) -> list[dict]:
-        """Re-ejecuta las consultas registradas y compara el número de filas devueltas.
+        """Re-ejecuta las consultas registradas y compara el número de filas devueltas (y la huella del resultado).
+
+        `engine` es un motor o una lista de motores. Cada consulta se re-ejecuta sobre el motor de LA COPIA en la que corrió
+        (campo `copy` del registro): una consulta del agente sobre la copia seudonimizada solo tiene sentido sobre esa misma
+        copia, porque `U-0003` no existe en los datos reales. Las consultas sin sello (anteriores a P1-b.2b) corrieron sobre los
+        datos reales. Si falta el motor de alguna copia, esas consultas NO se verifican: salen con `skipped=True` y `match=False`
+        (no verificada no es lo mismo que alterada, por eso no cuentan como `mismatches` en la entrada del ledger).
 
         Las re-ejecuciones son verificaciones, no análisis nuevo: no se añaden al historial del motor y el
         resultado queda como UNA entrada `replay` en el ledger (en vez de duplicar cada consulta).
         """
-        if engine.dataset_sha256 != self.dataset_sha256:
-            raise DatasetMismatch("El motor usa un dataset distinto al del ledger")
-        mark = len(engine.history)
+        engines = list(engine) if isinstance(engine, (list, tuple, set)) else [engine]
+        if not engines:
+            raise ValueError("replay necesita al menos un motor")
+        self._sync()
+        for e in engines:
+            if e.dataset_sha256 != self.dataset_sha256:
+                raise DatasetMismatch("El motor usa un dataset distinto al del ledger")
+            if e.copy_kind == "pseudonymized" and e.copy_id not in self._copies:
+                raise CopyMismatch(f"La copia {e.copy_id} no está registrada en este ledger: otra política o un Parquet "
+                                   f"reconstruido; sus alias no son los que vio el modelo")
+        by_copy = {e.copy_id: e for e in engines}
+        real = next((e for e in engines if e.copy_kind == "real"), None)
+        marks = {id(e): len(e.history) for e in engines}
         results = []
-        for e in self.entries("query"):
-            d = e["data"]
+        for entry in self.entries("query"):
+            d = entry["data"]
             if d["status"] != "ok":
                 continue
+            copy = d.get("copy") or "real"  # sin sello: consulta anterior a P1-b.2b, siempre sobre los datos reales
+            target = real if copy.startswith("real") else by_copy.get(copy)
+            base = {"query_id": d["query_id"], "copy": copy, "recorded_rows": d["rows"]}
+            if target is None:
+                results.append({**base, "replayed_rows": None, "hash_match": None, "match": False, "skipped": True,
+                                "error": f"sin motor para la copia {copy}"})
+                continue
             try:
-                res = engine.query(d["sql"], max_rows=d.get("limit"))  # mismo tope que en la ejecución original
+                res = target.query(d["sql"], max_rows=d.get("limit"))  # mismo tope que en la ejecución original
                 rows = res.row_count
                 recorded_hash = d.get("result_sha256")
                 # Con truncamiento, un LIMIT sin ORDER BY puede elegir otras filas: solo se compara el recuento.
                 comparable = recorded_hash is not None and not d.get("truncated") and not res.truncated
-                hash_match = (engine.history[-1]["result_sha256"] == recorded_hash) if comparable else None
-                results.append({"query_id": d["query_id"], "recorded_rows": d["rows"], "replayed_rows": rows,
-                                "hash_match": hash_match, "match": rows == d["rows"] and hash_match is not False})
+                hash_match = (target.history[-1]["result_sha256"] == recorded_hash) if comparable else None
+                results.append({**base, "replayed_rows": rows, "hash_match": hash_match,
+                                "match": rows == d["rows"] and hash_match is not False})
             except Exception as exc:  # noqa: BLE001 - se reporta, no se oculta
-                results.append({"query_id": d["query_id"], "recorded_rows": d["rows"], "replayed_rows": None,
-                                "hash_match": None, "match": False, "error": f"{type(exc).__name__}: {exc}"})
-        del engine.history[mark:]
+                results.append({**base, "replayed_rows": None, "hash_match": None, "match": False,
+                                "error": f"{type(exc).__name__}: {exc}"})
+        for e in engines:
+            del e.history[marks[id(e)]:]
         if record:
+            by = {}
+            for r in results:
+                c = by.setdefault(r["copy"], {"queries": 0, "matches": 0})
+                c["queries"] += 1
+                c["matches"] += bool(r["match"])
             self.append("replay", {"queries": len(results), "matches": sum(r["match"] for r in results),
-                                   "mismatches": [r["query_id"] for r in results if not r["match"]],
+                                   "mismatches": [r["query_id"] for r in results if not r["match"] and not r.get("skipped")],
+                                   "skipped": [r["query_id"] for r in results if r.get("skipped")],
+                                   "by_copy": by,
                                    "hash_checked": sum(r["hash_match"] is not None for r in results),
                                    "hash_mismatches": [r["query_id"] for r in results if r["hash_match"] is False]})
         return results

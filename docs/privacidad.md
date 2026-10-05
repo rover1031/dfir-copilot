@@ -52,7 +52,80 @@ ps.reveal_any("U-0003 consulta desde IP-0042")   # revela un texto del modelo (l
 4,48 M de filas: unos 13 s con 43 000 IPs distintas; 27 s en el peor caso (una IP distinta por fila), con 2 GB de memoria. Se
 hace una vez por caso y política.
 
-## Pendiente (P1-b.2b)
+## El agente sobre la copia (P1-b.2b)
 
-Conectar la copia al toolkit y al agente, seudonimizar los hallazgos de los detectores (que corren sobre los datos reales) antes
-de mostrarlos al modelo, registrar en el ledger sobre qué copia corrió cada consulta y que el `replay` la use.
+```python
+ws = CaseWorkspace.open("IDOR-INVOICES-2020Q4-TZ-SANTIAGO")
+engine, ps = ws.pseudonymized(timeout_s=120)   # motor sobre la copia + diccionario local
+ledger = ws.ledger()                            # el ledger se abre SIEMPRE con el motor de los datos reales
+agent = build_agent(engine, ledger, make_llm())
+...
+ledger.replay([ws.engine(), engine])            # cada consulta se re-ejecuta sobre la copia en la que corrió
+```
+
+**El agente rechaza un motor de datos reales** (`PrivacyError`) salvo `allow_real=True`, pensado para datos sintéticos o no
+sensibles. No es solo una advertencia: lo que devuelven las herramientas viaja a un LLM externo.
+
+### Qué se registra y dónde
+
+| Dónde | Qué |
+|---|---|
+| Cada consulta (`query`) | campo `copy` **dentro** del registro hasheado: `real:<sha12>` o `pseudonymized:<sha12>` (hash del Parquet que se abre) |
+| `data_copy` (una vez por copia) | política y tratamientos, hash del Parquet, hash del diccionario (**nunca su contenido**) y hash del Parquet real del que sale |
+| `tool_call`, `agent_turn`, `hypothesis` | el mismo `copy` |
+
+El sello va dentro del registro porque copia y real comparten `dataset_sha256` (es el mismo archivo de origen). Sin él, una
+consulta como `SELECT count(*) FROM logs` produce el mismo registro en ambas y el ledger daría por hecha la primera (hay un test
+que lo demuestra). Las entradas anteriores a P1-b.2b no llevan sello y se tratan como hechas sobre los datos reales.
+
+El ledger **rechaza** `record_queries` de una copia seudonimizada sin registrar (`CopyNotRegistered`, antes de escribir nada) y
+`record_copy` de una copia construida desde otro Parquet que el que abrió el caso (`CopyMismatch`). El toolkit y el agente la
+registran solos; con motores a mano, `ledger.record_copy(engine)`.
+
+### Replay copia por copia
+
+`ledger.replay(engine)` acepta un motor o una lista. Cada consulta se re-ejecuta en el motor de **su** copia (`U-0003` no existe en
+los datos reales). Si falta el motor de alguna copia, esas consultas salen con `skipped=True` y `match=False`: **no verificada no es
+lo mismo que alterada**, así que no cuentan en `mismatches` de la entrada `replay` (van en `skipped`, y `by_copy` resume cada copia).
+Una copia con otra política (otro alias) o un Parquet reconstruido se rechaza (`CopyMismatch`).
+
+### Decisión: los detectores corren sobre la copia, no sobre los datos reales
+
+La primera idea fue ejecutarlos sobre los datos reales y traducir los hallazgos a alias. Se descartó: un hallazgo arrastra valores en
+campos que no son `entity` ni `related`. Medido sobre el dataset sintético, `automation_clients` sobre datos reales devuelve en
+`metrics.herramientas` el User-Agent crudo (`wget (ops@acme.com 10.9.8.7)`); sobre la copia sale `wget ({email} {ip})`. Traducir por
+columna deja esa fuga, y traducir texto libre es poco fiable (¿ese número es un id o una cifra?). Es el mismo argumento de "por qué
+en el origen y no en las respuestas".
+
+El precio: `scrub` y `mask_*` pueden fundir valores distintos en uno. **`detector_parity(real, copia, ps)`** lo mide en local:
+cruza los hallazgos de ambos lados por detector + entidad traducida a alias y compara severidad y métricas numéricas. Las
+diferencias de texto (p. ej. la lista de User-Agent) se listan **por nombre de métrica, nunca por valor**, de modo que el resultado
+solo lleva alias y cifras. Conviene correrla una vez por dataset real antes de fiarse de los hallazgos de la copia.
+
+### Lo que el modelo sabe de la copia
+
+El prompt de sistema lleva un bloque generado del manifiesto (`privacy_context`): alias y su formato, `src_ip_scope`/`src_ip_net`,
+qué columnas están desplazadas y qué significa eso (el valor absoluto no es real), qué se oculta en `query_string`, `endpoint` y
+`user_agent`, y qué queda sin cambios. Sin él se interpreta mal lo que se ve: `x_invoice_id = 0` no es una factura, y `src_ip LIKE
+'10.%'` no devuelve nada porque la columna ya es un alias. El bloque es estático durante un hilo (invariante de prefijo).
+`describe_dataset` añade `privacy` con los tratamientos de las columnas que tienen datos.
+
+### Hipótesis anteriores
+
+El *briefing* devuelve al modelo el texto de las hipótesis del caso. Una hipótesis formulada cuando el agente veía datos reales (o
+sobre otra política) puede contener valores que la copia oculta, así que su texto **no se muestra**: el modelo ve el id, el estado y
+la evidencia, y la marca `[texto no mostrado…]`. Solo se muestra el texto de las formuladas sobre la misma copia (campo `copy`).
+Si sigue vigente, se vuelve a formular con alias.
+
+Además, `describe_dataset` ya no envía `timezone.note` (texto libre del analista: quién declaró la zona y cuándo); P1-a ya lo
+excluía del perfil y el toolkit lo dejaba pasar.
+
+### Qué NO cubre todavía
+
+* **Texto libre del analista hacia el modelo**: la pregunta de `ask()` y la nota de `resolve()`. Si escribes `66.6.6.1` en una
+  pregunta, viaja tal cual (y el modelo no lo encontrará: en la copia es `IP-0042`). Escribe con alias; la traducción o el bloqueo
+  automático es candidato a P1-b.3, junto a las notas del analista.
+* `CaseWorkspace.verify()` aún no comprueba la copia (hash del Parquet seudonimizado y del diccionario frente a la entrada
+  `data_copy`); hoy lo comprueban `QueryEngine` y `Pseudonymizer` al abrirlos.
+* Con `resource` inferido como `endpoint` (log sin identificador de recurso), el recurso queda enmascarado a `{id}` y la
+  amplitud de recursos pierde resolución. No afecta al caso `x_invoice_id`.

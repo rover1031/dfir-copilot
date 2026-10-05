@@ -34,6 +34,11 @@ import duckdb
 from dfir_copilot.ingest.ingestor import sha256_file
 
 POLICY_VERSION = "priv-1"
+
+
+class PrivacyError(Exception):
+    """Se intentó entregar al LLM algo que no sale de la copia seudonimizada."""
+
 TREATMENTS = ("alias", "ip", "shift", "mask_values", "mask_ids", "scrub", "keep")
 _NUMERIC = {"BIGINT", "INTEGER", "SMALLINT", "TINYINT", "HUGEINT", "DOUBLE", "FLOAT", "DECIMAL", "UBIGINT", "UINTEGER"}
 DEFAULT_RULES = {
