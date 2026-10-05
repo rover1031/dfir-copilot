@@ -16,7 +16,7 @@ from pathlib import Path
 from dfir_copilot.engine.query_engine import QueryEngine
 from dfir_copilot.evidence.ledger import _CASE_ID, Ledger, verify_file
 from dfir_copilot.i18n import resolve_lang, t
-from dfir_copilot.ingest.ingestor import MAPPINGS_DIR, ingest_csv, sha256_file
+from dfir_copilot.ingest.ingestor import MAPPINGS_DIR, ingest_file, sha256_file
 
 DEFAULT_ROOT = "/workspace/data/cases"
 CASE_VERSION = 1
@@ -98,6 +98,20 @@ class CaseWorkspace:
             raise CaseError(t("case.err.not_found", ws.lang, case_id=case_id, root=root))
         return ws
 
+    @classmethod
+    def open_or_create(cls, case_id: str, root: str | Path = DEFAULT_ROOT, analyst: str | None = None,
+                       lang: str | None = None) -> CaseWorkspace:
+        """Abre el caso si existe y lo crea si no: un notebook puede re-ejecutarse sin tocar celdas.
+
+        Una carpeta a medias (sin case.json) no se reutiliza en silencio: es un estado que debe mirar el analista.
+        """
+        ws = cls(root, case_id, lang)
+        if ws.meta_path.exists():
+            return cls.open(case_id, root, lang)
+        if ws.dir.exists():
+            raise CaseError(t("case.err.incomplete", ws.lang, path=ws.dir))
+        return cls.create(case_id, root, analyst, lang)
+
     @staticmethod
     def list_cases(root: str | Path = DEFAULT_ROOT) -> list[dict]:
         out = []
@@ -143,8 +157,8 @@ class CaseWorkspace:
             dest.chmod(0o444)
         return dest
 
-    def ingest(self, csv_path: str | Path, mapping: str | Path, memory_limit: str = "2GB") -> dict:
-        """Normaliza el CSV al espacio del caso. `mapping` es un nombre del paquete (p. ej. `web_access_meli`) o la
+    def ingest(self, path: str | Path, mapping: str | Path, memory_limit: str = "2GB") -> dict:
+        """Normaliza un archivo (CSV, TSV, JSON/NDJSON, Parquet; también .gz) al espacio del caso. `mapping` es un nombre del paquete (p. ej. `web_access_meli`) o la
         ruta a un YAML aprobado; en ambos casos se copia a `mapping.yaml` dentro del caso."""
         if self.sealed:
             raise CaseLocked(t("case.err.locked", self.lang, case_id=self.case_id))
@@ -154,8 +168,8 @@ class CaseWorkspace:
         if not source_file.exists():
             raise FileNotFoundError(source_file)
         shutil.copyfile(source_file, self.mapping_path)
-        manifest = ingest_csv(csv_path, source=str(mapping), out_dir=self.processed_dir, memory_limit=memory_limit,
-                              mapping_path=self.mapping_path, overwrite=True)  # el caso no está sellado: se puede rehacer
+        manifest = ingest_file(path, source=str(mapping), out_dir=self.processed_dir, memory_limit=memory_limit,
+                               mapping_path=self.mapping_path, overwrite=True)  # el caso no está sellado: se puede rehacer
         meta = self.meta
         meta["dataset"] = {"parquet": Path(manifest["output"]["path"]).name,
                            "input_sha256": manifest["input"]["sha256"], "mapping_sha256": manifest["mapping"]["sha256"],

@@ -37,6 +37,24 @@ def _lit(value: str) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
+def _q(name: str) -> str:
+    return '"' + name.replace('"', '""') + '"'
+
+
+def restricted_connection(path: str | Path, memory_limit: str = "2GB", temp_dir: str | Path | None = None):
+    """Conexión DuckDB que solo puede leer `path`: sin otros archivos ni red, y con la configuración bloqueada."""
+    con = duckdb.connect(":memory:")
+    con.execute("SET TimeZone = 'UTC'")
+    con.execute(f"SET memory_limit = {_lit(memory_limit)}")
+    if temp_dir is not None:
+        con.execute(f"SET temp_directory = {_lit(str(temp_dir))}")
+    allowed = [str(Path(path).resolve())] + ([str(temp_dir)] if temp_dir is not None else [])
+    con.execute("SET allowed_paths = [" + ", ".join(_lit(a) for a in allowed) + "]")
+    con.execute("SET enable_external_access = false")
+    con.execute("SET lock_configuration = true")
+    return con
+
+
 def detect_format(path: str | Path, lang: str | None = None) -> tuple[str, str | None]:
     p = Path(path)
     suffixes = [s.lower() for s in p.suffixes]
@@ -53,8 +71,12 @@ def detect_format(path: str | Path, lang: str | None = None) -> tuple[str, str |
     raise SourceError(t("err.unsupported_format", lang, ext=core or p.name))
 
 
-def relation_sql(spec: SourceSpec) -> str:
-    """Función de tabla de DuckDB para leer la fuente. Los CSV se leen como texto: el perfilado decide los tipos."""
+def relation_sql(spec: SourceSpec, explicit: bool = False) -> str:
+    """Función de tabla de DuckDB para leer la fuente. Los CSV se leen como texto: el perfilado decide los tipos.
+
+    `explicit=True` fija encabezado y separador con lo detectado (la ingesta debe ser determinista y no depender de
+    que el lector vuelva a adivinar).
+    """
     path = _lit(spec.path)
     if spec.format == "parquet":
         return f"read_parquet({path})"
@@ -65,6 +87,10 @@ def relation_sql(spec: SourceSpec) -> str:
     opts = ["all_varchar=true", f"encoding={_lit(spec.encoding or 'utf-8')}"]
     if spec.format == "tsv":
         opts.append("delim='\\t'")
+    elif explicit and spec.delimiter:
+        opts.append(f"delim={_lit(spec.delimiter)}")
+    if explicit:
+        opts.append("header=true")
     return f"read_csv({path}, {', '.join(opts)})"
 
 
@@ -74,7 +100,10 @@ def open_source(con: duckdb.DuckDBPyConnection, path: str | Path, lang: str | No
     p = Path(path)
     if not p.exists():
         raise SourceError(t("err.not_found", lang, file=p.name))
-    detected, compression = detect_format(p, lang) if fmt is None else (fmt, None)
+    if fmt is None:
+        detected, compression = detect_format(p, lang)
+    else:  # el mapping fija el formato (p. ej. un .log que en realidad es JSON); la compresión sale de la extensión
+        detected, compression = fmt, _COMPRESSIONS.get(p.suffix.lower())
     base = SourceSpec(str(p.resolve()), detected, compression)
     notes: list[tuple[str, dict]] = []
     last_error: Exception | None = None
@@ -111,3 +140,24 @@ def open_source(con: duckdb.DuckDBPyConnection, path: str | Path, lang: str | No
             last_error = exc
     raise SourceError(t("err.unreadable", lang, file=p.name, fmt=detected,
                         error=str(last_error).splitlines()[0][:200])) from last_error
+
+
+def leaf_exprs(con: duckdb.DuckDBPyConnection, rel: str, max_depth: int = 6) -> dict[str, tuple[str, str]]:
+    """Campos hoja de la fuente: ruta (`a.b.c`) -> (expresión SQL sobre el alias `src`, tipo DuckDB).
+
+    Una clave plana que contiene puntos (`host.hostname`, típica de LogScale) y una estructura anidada `host` -> `hostname`
+    dan la misma ruta de texto; cada una conserva su expresión correcta. Si ambas existieran, gana la primera.
+    """
+    r = con.sql(f"SELECT * FROM {rel} AS src LIMIT 0")
+    out: dict[str, tuple[str, str]] = {}
+
+    def walk(path: tuple, dtype, depth: int) -> None:
+        if dtype.id == "struct" and depth < max_depth:
+            for name, child in dtype.children:
+                walk(path + (name,), child, depth + 1)
+        else:
+            out.setdefault(".".join(path), ("src." + ".".join(_q(p) for p in path), str(dtype)))
+
+    for name, dtype in zip(r.columns, r.types, strict=True):
+        walk((name,), dtype, 0)
+    return out

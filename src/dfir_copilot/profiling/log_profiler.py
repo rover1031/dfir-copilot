@@ -31,7 +31,7 @@ from dfir_copilot.profiling.data_profile import (
     Warning_,
 )
 from dfir_copilot.profiling.i18n import resolve_lang, t
-from dfir_copilot.profiling.readers import open_source, relation_sql
+from dfir_copilot.profiling.readers import open_source, relation_sql, restricted_connection
 from dfir_copilot.profiling.schema_mapper import FieldInfo, SchemaMapper, normalize_name
 from dfir_copilot.profiling.semantics import (
     DATETIME_HINT,
@@ -109,14 +109,8 @@ class LogProfiler:
         self._warnings.append(Warning_(code=code, field=field, message=t(code, self.lang, field=field, **kwargs)))
 
     def _connect(self) -> duckdb.DuckDBPyConnection:
-        con = duckdb.connect(":memory:")
-        con.execute("SET TimeZone = 'UTC'")
-        con.execute(f"SET memory_limit = {_lit(self.memory_limit)}")
         # Defensa en profundidad: esta conexión solo puede leer el archivo perfilado.
-        con.execute(f"SET allowed_paths = [{_lit(str(self.path.resolve()))}]")
-        con.execute("SET enable_external_access = false")
-        con.execute("SET lock_configuration = true")
-        return con
+        return restricted_connection(self.path, self.memory_limit)
 
     def _sha256(self) -> str | None:
         if not self.compute_hash:
@@ -354,6 +348,7 @@ class LogProfiler:
             if tz_in_data is False:
                 self._warn("warn.timezone_unknown", lf.path)
             pct_by_label = dict(scores)
+            rejected: dict[float, list[str]] = {}  # varias lecturas equivalentes (iso8601 y %Y-%m-%d…) = un solo aviso
             for a_, b_ in DAY_MONTH_PAIRS:
                 if label not in (a_, b_):
                     continue
@@ -362,7 +357,9 @@ class LogProfiler:
                 if p_other >= 95 and pct_sample >= 95 and self._differs(con, primary_i, label, other):
                     self._warn("warn.timestamp_ambiguous", lf.path, a=label, b=other)
                 elif 0 < p_other < 95:
-                    self._warn("warn.timestamp_rejected_alt", lf.path, fmt=other, pct=p_other)
+                    rejected.setdefault(p_other, []).append(other)
+            for pct, labels in rejected.items():
+                self._warn("warn.timestamp_rejected_alt", lf.path, fmt=" / ".join(dict.fromkeys(labels)), pct=pct)
         elif rows:
             self._warn("warn.no_timestamp")
         con.close()

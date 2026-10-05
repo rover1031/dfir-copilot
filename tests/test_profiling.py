@@ -360,3 +360,10 @@ def test_logscale_ningun_valor_crudo(logscale_json):
     payload = profile(logscale_json).to_llm_json()
     assert not [s for s in ("HOST", "usuario", "10.20.0.", "172.16.0.", "valor-", "bash -c", "/usr/bin", "sshd")
                 if s in payload]
+
+
+def test_las_lecturas_equivalentes_de_una_fecha_descartada_dan_un_solo_aviso(web_csv):
+    """iso8601 y %Y-%m-%dT%H:%M son la misma lectura mes-día: antes salían dos avisos con el mismo porcentaje."""
+    p = profile(web_csv[0])
+    (w,) = [w for w in p.warnings if w.code == "warn.timestamp_rejected_alt"]
+    assert "iso8601" in w.message and "%Y-%m-%dT%H:%M" in w.message

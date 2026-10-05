@@ -57,7 +57,7 @@ def test_el_mapping_valido_carga_y_registra_su_hash(mappings):
     (variant(format=None), "falta 'format'"),
     (variant(fields=None), "falta 'fields'"),
     (variant(timestamp=None), "falta 'timestamp'"),
-    (variant(format="json"), "solo soporta format: csv"),
+    (variant(format="xlsx"), "no soportado"),
     (variant(fields={"uri": "http_uri"}), "incluir 'timestamp'"),
     (variant(fields={"timestamp": "timestamp"}), "'uri' o 'endpoint'"),
     (variant(fields={**VALID["fields"], "campo_raro": "x"}), "desconocido"),
@@ -81,7 +81,7 @@ def test_una_derivada_que_apunta_a_una_columna_inexistente_falla_al_ingestar(map
     mappings(variant(derived={"x_a": {"from": "columna_inventada", "regex": "(a)"}}))
     csv = tmp_path / "datos.csv"
     csv.write_text(HEADER + ROW + "\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="no existe entre las columnas base"):
+    with pytest.raises(ValueError, match="no existe en el origen"):
         ingest_csv(csv, "fuente_x", out_dir=tmp_path / "out")
 
 

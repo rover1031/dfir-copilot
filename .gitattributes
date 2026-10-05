@@ -1,0 +1,3 @@
+# Con `nbstripout --install` Git limpia las salidas de los notebooks al hacer commit.
+*.ipynb filter=nbstripout
+*.ipynb diff=ipynb

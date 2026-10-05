@@ -124,7 +124,7 @@ de parámetros pueden ser descriptivos. Ambos son metadatos de esquema, no regis
 |---|---|---|
 | **P0-A** | Perfilado local multi-formato, mapeo bilingüe, Data Profile | Hecho |
 | **P0-B2** | Espacio por caso, integridad ledger/dataset, huella de resultados, roles de detectores | Hecho (§12) |
-| **P0-B1** | Inspector (Data Profile → borrador de mapping, incl. campos derivados de la URL) e ingestor multi-formato con rutas anidadas | Pendiente |
+| **P0-B1** | Inspector (borrador de mapping con campos derivados de la URL) e ingestor multi-formato con rutas anidadas | Hecho (§13) |
 | Fase LLM | Herramienta del agente que recibe el Data Profile y devuelve clasificación, mapeo y consultas | Pendiente |
 | P1/P2 | Prompts y reporte bilingües | Pendiente |
 
@@ -214,3 +214,82 @@ cadena sigue válida, pero el `head_hash` avanza: guarda el anterior como punto 
 * `verify()` calcula el SHA-256 del original en `raw/`: con 1 GB son unos segundos.
 * La inferencia de roles es una heurística. Un mapping debe declararlos; la inferencia existe para datasets anteriores.
 * `mapping.yaml` del caso es inmutable por convención y por verificación, no por permisos del sistema de archivos.
+
+## 13. P0-B1 · Inspector e ingestor multi-formato
+
+### 13.1 Flujo
+
+```
+archivo ──► LogProfiler ──► Data Profile ─┐
+   │                                       ├─► Inspector ──► BORRADOR (YAML + decisiones) ──► analista revisa ──► mapping aprobado
+   └─► análisis LOCAL de valores de la URL ┘                                                                          │
+        (ejemplos enmascarados)                                                           CaseWorkspace.ingest ◄───────┘
+```
+
+El Inspector **propone**; no ingiere ni modifica el archivo. El borrador es un YAML con comentarios y una lista de
+decisiones pendientes; el archivo que el analista deja guardado es el mapping aprobado, que `CaseWorkspace.ingest` copia
+al caso. Por qué hace falta un análisis aparte del Data Profile: para proponer `user_id` a partir de
+`authtoken=ATUSER-ID-<x>` hay que ver la forma de los valores, y el perfil no los lleva por diseño. Ese análisis ocurre
+en una conexión DuckDB restringida a ese archivo y lo único que se muestra son estadísticas y ejemplos enmascarados
+(`an*******`).
+
+### 13.2 Qué propone el Inspector
+
+| Elemento | Cómo |
+|---|---|
+| Campos canónicos | El mapeo bilingüe del perfil, filtrado a los que el esquema sabe ingerir; el resto se informa («no se ingieren») |
+| Línea de petición | Si el campo de URL contiene `GET /ruta HTTP/1.1`, usa `request_line` y el ingestor separa método y ruta |
+| Fecha | Formato, zona y verificación a partir del perfil; `native`, `epoch_s`, `epoch_ms`, `iso8601` o `strptime` |
+| Derivadas | Por cada parámetro de la URL: **numérico** con muchos valores → recurso (`BIGINT`); pocos valores → dimensión; **prefijo+id** (`ATUSER-ID-ana`, `user:ana`) → tipo de credencial + identidad; nombre de campo canónico (`username=`) → ese campo |
+| Roles | `actor` = `user_id` si existe, si no `src_ip`; `resource` = la derivada numérica con más valores distintos |
+
+Reglas para no inventar: una identidad exige que el valor se repita entre peticiones (un token único por fila no es un
+actor); parámetros presentes en menos del 5 % de las filas se ignoran; el tope es de 12 parámetros.
+
+### 13.3 Decisiones
+
+Cada una lleva un código estable (inglés) y un nivel. **required** bloquea el estado `ready`; **review** no, pero queda
+escrita en el YAML.
+
+| Código | Nivel | Cuándo |
+|---|---|---|
+| `date_order_ambiguous` | required | Día-mes y mes-día interpretan el 95 % o más de los datos con resultados distintos |
+| `header_missing` | required | El CSV no parece tener encabezado |
+| `invalid_draft` | required | El borrador no pasa la validación del ingestor |
+| `missing_timestamp`, `missing_uri`, `unsupported_log_type` | required | El archivo no se puede ingerir (estado `unsupported`) |
+| `timezone_unverified` | review | La fecha no trae zona horaria |
+| `mapping_ambiguous` | review | Dos columnas compiten por el mismo campo |
+| `derived_identity`, `credential_in_url` | review | Se extrae una identidad de un parámetro; credencial expuesta en el log |
+| `unsupported_fields` | review | Campos reconocidos que el esquema no incluye |
+
+### 13.4 Ingestor multi-formato
+
+`ingest_file` (con `ingest_csv` como alias histórico) lee CSV, TSV, JSON/NDJSON, arreglos JSON y Parquet, comprimidos o
+no, con la misma lectura que el perfilador. Novedades del mapping:
+
+* `format`: `auto`, `csv`, `tsv`, `json`, `parquet`.
+* Rutas anidadas: `http.request.method` resuelve tanto una estructura `http → request → method` como una clave plana con
+  puntos (LogScale). Una columna inexistente falla con sugerencia.
+* `timestamp.format`: `native` (columna ya tipada), `epoch_s`, `epoch_ms`, `iso8601` (+ `timezone_in_data`), o
+  `strptime`; meses en español (`ene`, `abr`, `ago`, `dic`) y `%z`.
+* `request_line`: separa método y ruta; no se combina con `uri` ni `http_method`.
+* `derived.from` puede ser una columna base (`query_string`) o cualquier ruta del origen.
+* Aviso si una derivada queda vacía en todas las filas (regex o campo de origen erróneos).
+* El manifiesto registra formato, compresión y codificación; el Parquet no arrastra la extensión de origen
+  (`export.ndjson.gz` → `export.parquet`).
+* Un JSON cuyo tipo cambia después de la muestra de inferencia se reintenta leyendo el archivo completo.
+
+**Compatibilidad:** con el mismo CSV y el mismo mapping, el Parquet resultante es idéntico byte a byte al de B2.
+
+### 13.5 Límites conocidos
+
+* **Solo logs web.** El esquema canónico tiene 13 campos web. La telemetría de EDR, firewall o autenticación se
+  reconoce y se perfila, pero el Inspector la declara `unsupported`; necesita su propio esquema (pendiente P3).
+* **Los derivados se infieren de una muestra** (20 000 filas por defecto, reproducible). Los parámetros raros que no
+  aparezcan en la muestra no se proponen.
+* **Prefijo+id solo con separadores conocidos:** `-ID-`, `_ID_`, `:` y `|`.
+* **El JSON tipado pierde la zona:** DuckDB convierte una fecha ISO a `TIMESTAMP` sin zona; el Inspector lo marca
+  `timezone_unverified`.
+* **La hora sigue siendo una decisión humana.** Ningún código puede saber en qué zona exportó el sistema de origen.
+* **Tiempo:** unos 30 s sobre un CSV de 1 GB y 4,5 M de filas en un solo núcleo (perfil + análisis de valores), 0,2 GB
+  de RAM; la ingesta tarda unos 30 s y usa hasta el límite de memoria configurado (2 GB).
