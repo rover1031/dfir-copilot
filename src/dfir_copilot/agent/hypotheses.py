@@ -25,6 +25,10 @@ class DecisionRequest:
     to: str
     evidence_refs: tuple
     rationale: str
+    refutation_checks: tuple = ()  # solo al confirmar: ({"ref", "would_refute_if", "observed"}, …)
+
+
+MIN_CHECK_TEXT = 10
 
 
 class HypothesisBook:
@@ -40,7 +44,8 @@ class HypothesisBook:
         for entry in ledger.entries():
             d = entry["data"]
             if entry["type"] == "hypothesis":
-                self._items[d["hypothesis_id"]] = {**d, "status": "propuesta", "evidence_refs": [], "history": []}
+                self._items[d["hypothesis_id"]] = {**d, "seq": entry["seq"], "status": "propuesta", "evidence_refs": [],
+                                                   "history": []}
             elif entry["type"] == "hypothesis_update" and d["hypothesis_id"] in self._items:
                 self._apply(self._items[d["hypothesis_id"]], d)
 
@@ -49,6 +54,8 @@ class HypothesisBook:
         item["history"].append({k: update.get(k) for k in ("from", "to", "decision", "decided_by", "note")})
         if update["decision"] in ("auto", "approved"):
             item["status"] = update["to"]
+            if update.get("refutation_checks"):
+                item["refutation_checks"] = list(update["refutation_checks"])
             item["evidence_refs"] = sorted(set(item["evidence_refs"]) | set(update.get("evidence_refs", [])))
 
     def all(self) -> list[dict]:
@@ -60,9 +67,13 @@ class HypothesisBook:
         return self._items[hid]
 
     def propose(self, statement: str, rationale: str = "", test_plan: str = "",
-                proposed_by: str = "agent", copy: str | None = None) -> tuple[dict, bool]:
+                proposed_by: str = "agent", copy: str | None = None,
+                falsifier: str | None = None) -> tuple[dict, bool]:
         """`copy`: identidad de la copia de datos sobre la que se formula (`engine.copy_id`). El texto de una hipótesis puede
-        llevar valores de ESA copia; el agente solo se lo muestra de vuelta al modelo si sigue consultando la misma."""
+        llevar valores de ESA copia; el agente solo se lo muestra de vuelta al modelo si sigue consultando la misma.
+
+        `falsifier`: qué resultado en los datos la REFUTARÍA, fijado antes de probarla. Es opcional aquí (hipótesis anteriores,
+        o propuestas por el analista) pero el agente está obligado a darlo (ver `ProposeArgs`)."""
         statement = " ".join(statement.split())
         if not 10 <= len(statement) <= 500:
             raise HypothesisError("La hipótesis debe tener entre 10 y 500 caracteres")
@@ -73,8 +84,10 @@ class HypothesisBook:
                 "test_plan": test_plan.strip(), "proposed_by": proposed_by}
         if copy:
             data["copy"] = copy
-        self.ledger.append("hypothesis", data)
-        self._items[hid] = {**data, "status": "propuesta", "evidence_refs": [], "history": []}
+        if falsifier and falsifier.strip():
+            data["falsifier"] = " ".join(falsifier.split())[:500]
+        stored = self.ledger.append("hypothesis", data)
+        self._items[hid] = {**data, "seq": stored["seq"], "status": "propuesta", "evidence_refs": [], "history": []}
         return self._items[hid], True
 
     def start_testing(self, hid: str) -> dict:
@@ -89,8 +102,11 @@ class HypothesisBook:
         self._apply(item, update)
         return item
 
-    def request_decision(self, hid: str, to: str, evidence_refs, rationale: str) -> DecisionRequest:
-        """Valida una petición de cierre. No cambia el estado: hace falta la decisión del analista."""
+    def request_decision(self, hid: str, to: str, evidence_refs, rationale: str,
+                         refutation_checks=()) -> DecisionRequest:
+        """Valida una petición de cierre. No cambia el estado: hace falta la decisión del analista.
+
+        Confirmar exige `refutation_checks`: al menos un intento real de refutar la hipótesis (ver `_validate_checks`)."""
         item = self.get(hid)
         if to not in FINAL:
             raise HypothesisError(f"el estado solicitado debe ser uno de {FINAL}")
@@ -107,7 +123,35 @@ class HypothesisBook:
                                   "Usa solo ids devueltos por las herramientas.")
         if not rationale or not rationale.strip():
             raise HypothesisError("Falta la justificación (rationale)")
-        return DecisionRequest(hid, to, refs, rationale.strip())
+        checks = self._validate_checks(item, refutation_checks) if to == "confirmada" else ()
+        return DecisionRequest(hid, to, refs, rationale.strip(), checks)
+
+    def _validate_checks(self, item: dict, checks) -> tuple:
+        """Un intento de refutación cuenta si es una consulta que se ejecutó con éxito DESPUÉS de proponer la hipótesis.
+
+        Lo que se comprueba es objetivo (existe, salió bien, es posterior). Que de verdad buscara refutarla no se puede verificar
+        por código: por eso el analista ve la consulta, qué la habría refutado y qué se observó antes de aprobar."""
+        if not checks:
+            raise HypothesisError(
+                "Para confirmar falta un intento de refutación (refutation_checks): una consulta posterior a proponer la "
+                "hipótesis que buscaba refutarla. Indica ref (q-…), would_refute_if y observed. Si no puedes diseñar una "
+                "prueba que pueda fallar, no la confirmes.")
+        ok = {e["data"]["query_id"]: e["seq"] for e in self.ledger.entries("query") if e["data"].get("status") == "ok"}
+        out, problems = [], []
+        for c in checks:
+            ref, would, seen = c.get("ref", ""), " ".join(str(c.get("would_refute_if", "")).split()), \
+                " ".join(str(c.get("observed", "")).split())
+            if ref not in ok:
+                problems.append(f"{ref}: no es una consulta ejecutada con éxito; usa un id q-… devuelto por las herramientas")
+            elif ok[ref] <= item["seq"]:
+                problems.append(f"{ref}: se ejecutó ANTES de proponer la hipótesis; un intento de refutación debe ser posterior")
+            elif len(would) < MIN_CHECK_TEXT or len(seen) < MIN_CHECK_TEXT:
+                problems.append(f"{ref}: describe qué resultado la habría refutado (would_refute_if) y qué observaste (observed)")
+            else:
+                out.append({"ref": ref, "would_refute_if": would, "observed": seen})
+        if problems:
+            raise HypothesisError("Intentos de refutación no válidos: " + "; ".join(problems))
+        return tuple({c["ref"]: c for c in out}.values())  # una vez por consulta
 
     def decide(self, request: DecisionRequest, approve: bool, analyst: str, note: str = "") -> dict:
         item = self.get(request.hypothesis_id)
@@ -117,6 +161,8 @@ class HypothesisBook:
                   "to": request.to if approve else item["status"], "requested_by": "agent",
                   "decided_by": analyst, "decision": "approved" if approve else "rejected",
                   "rationale": request.rationale, "note": note, "evidence_refs": list(request.evidence_refs)}
+        if request.refutation_checks:
+            update["refutation_checks"] = [dict(c) for c in request.refutation_checks]
         self.ledger.append("hypothesis_update", update)
         self._apply(item, update)
         return item

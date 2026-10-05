@@ -6,7 +6,7 @@ import json
 import re
 
 import pytest
-from test_agent import FULL, HID, STATEMENT, call, say
+from test_agent import FULL, HID, STATEMENT, call, propose, say
 
 from dfir_copilot.agent.graph import build_agent
 from dfir_copilot.agent.hypotheses import HypothesisBook, hypothesis_id
@@ -261,7 +261,7 @@ def test_una_hipotesis_de_otra_copia_no_vuelve_al_modelo(world, tmp_path, script
     assert hypothesis_id(old) in first and "texto no mostrado" in first            # el id y el estado se conservan
     assert "atacante00" not in first and "66.6.6.1" not in first
 
-    llm2 = scripted([call("propose_hypothesis", statement=STATEMENT), say("hecho"), say("ok")])
+    llm2 = scripted([propose(), say("hecho"), say("ok")])
     agent2 = build_agent(pseudo, ledger, llm2)
     agent2.ask("Propón")
     agent2.ask("Otra")                                                              # formulada sobre ESTA copia: sí se ve

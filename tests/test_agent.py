@@ -12,6 +12,9 @@ from dfir_copilot.synthetic import make_idor_dataset
 
 STATEMENT = "Cuatro identidades enumeran facturas ajenas desde un conjunto cerrado de cinco IPs"
 HID = hypothesis_id(STATEMENT)
+FALSIFIER = "Si otra identidad fuera del grupo usa esas IPs, o el grupo no accede a facturas que nadie más consulta, queda refutada"
+REFUTE_SQL = ("SELECT count(DISTINCT user_id) AS identidades FROM logs WHERE src_ip IN "
+              "(SELECT src_ip FROM logs GROUP BY 1 HAVING count(DISTINCT user_id) > 1)")
 _ids = itertools.count(1)
 USAGE = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
 
@@ -29,11 +32,24 @@ def tool_text(messages):
     return " ".join(m.content for m in messages if isinstance(m, ToolMessage))
 
 
+def propose(**extra):
+    """propose_hypothesis con el criterio de refutación que ahora es obligatorio."""
+    return call("propose_hypothesis", statement=STATEMENT, falsifier=FALSIFIER, **extra)
+
+
+def check_with_last_query(messages):
+    """Intento de refutación basado en la ÚLTIMA consulta que devolvió una herramienta (la del paso anterior del guion)."""
+    ref = re.findall(r"q-[0-9a-f]{12}", str(messages[-1].content))[-1]
+    return [{"ref": ref, "would_refute_if": "Habría identidades ajenas al grupo en esas IPs",
+             "observed": "Ninguna otra identidad usa esas IPs"}]
+
+
 def confirm_with_first_case(status="confirmada"):
     def step(messages):
         ref = re.search(r"c-[0-9a-f]{12}", tool_text(messages)).group(0)
         return call("update_hypothesis", hypothesis_id=HID, status=status, evidence_refs=[ref],
-                    rationale="Cuatro señales independientes sobre las mismas identidades")
+                    rationale="Cuatro señales independientes sobre las mismas identidades",
+                    refutation_checks=check_with_last_query(messages))
     return step
 
 
@@ -52,8 +68,9 @@ def setup(tmp_path, make_engine, scripted):
 def FULL():  # guion de una investigación completa
     return [
     call("describe_dataset"), call("run_detectors"),
-    call("propose_hypothesis", statement=STATEMENT, rationale="Lo sugieren los detectores", test_plan="Contrastar"),
+    propose(rationale="Lo sugieren los detectores", test_plan="Contrastar"),
     call("update_hypothesis", hypothesis_id=HID, status="en_prueba"),
+    call("run_query", sql=REFUTE_SQL),  # el intento de refutación: posterior a la hipótesis
     confirm_with_first_case(), say("Resumen: grupo cerrado confirmado. Próximas líneas: IAM."),
 ]
 
@@ -80,7 +97,7 @@ def test_el_agente_no_cierra_una_hipotesis_sin_el_analista(setup):
     assert agent.pending() == r1.approvals
 
     r2 = agent.resolve("approve", "Coincide con IAM")
-    assert r2.status == "done" and "Resumen" in r2.answer and r2.steps == 6
+    assert r2.status == "done" and "Resumen" in r2.answer and r2.steps == 7
     assert agent.book.get(HID)["status"] == "confirmada"
     last = ledger.entries("hypothesis_update")[-1]["data"]
     assert last["decided_by"] == "eder" and last["decision"] == "approved" and last["note"] == "Coincide con IAM"
@@ -101,7 +118,7 @@ def test_si_el_analista_rechaza_el_agente_lo_sabe_y_el_estado_no_cambia(setup):
 def test_evidencia_inventada_se_rechaza_sin_molestar_al_analista(setup):
     make, ledger, _, _ = setup
     agent, llm = make([
-        call("propose_hypothesis", statement=STATEMENT),
+        propose(),
         call("update_hypothesis", hypothesis_id=HID, status="en_prueba"),
         call("update_hypothesis", hypothesis_id=HID, status="confirmada", evidence_refs=["q-inventado"], rationale="x"),
         say("No pude confirmarla."),
@@ -114,7 +131,7 @@ def test_evidencia_inventada_se_rechaza_sin_molestar_al_analista(setup):
 def test_no_se_puede_cerrar_una_hipotesis_que_no_esta_en_prueba(setup):
     make, _, _, _ = setup
     agent, llm = make([
-        call("propose_hypothesis", statement=STATEMENT),
+        propose(),
         call("update_hypothesis", hypothesis_id=HID, status="confirmada", evidence_refs=["q-x"], rationale="x"),
         say("fin"),
     ])
@@ -206,7 +223,7 @@ def test_el_prefijo_del_modelo_es_estable_durante_todo_el_hilo(setup):
 
 def test_el_estado_de_las_hipotesis_llega_en_el_primer_mensaje_de_cada_pregunta(setup):
     make, _, _, _ = setup
-    agent, llm = make([call("propose_hypothesis", statement=STATEMENT), say("Propuse una."), say("Ya la vi.")])
+    agent, llm = make([propose(), say("Propuse una."), say("Ya la vi.")])
     agent.ask("Primera pregunta")
     agent.ask("Segunda pregunta")
     third_call = llm.log[2]["messages"]
@@ -269,11 +286,13 @@ def test_la_vista_de_aprobacion_no_recorta_la_justificacion_ni_el_sql_citado(set
     long_reason = "Justificación detallada. " * 32  # ~800 caracteres
 
     def confirm(messages):
-        ref = re.search(r"q-[0-9a-f]{12}", tool_text(messages)).group(0)
-        return call("update_hypothesis", hypothesis_id=HID, status="confirmada", evidence_refs=[ref], rationale=long_reason)
+        ref = re.search(r"q-[0-9a-f]{12}", tool_text(messages)).group(0)  # la consulta larga, anterior a la hipótesis
+        return call("update_hypothesis", hypothesis_id=HID, status="confirmada", evidence_refs=[ref], rationale=long_reason,
+                    refutation_checks=check_with_last_query(messages))
 
-    agent, _ = make([call("run_query", sql=long_sql), call("propose_hypothesis", statement=STATEMENT),
-                     call("update_hypothesis", hypothesis_id=HID, status="en_prueba"), confirm])
+    agent, _ = make([call("run_query", sql=long_sql), propose(),
+                     call("update_hypothesis", hypothesis_id=HID, status="en_prueba"),
+                     call("run_query", sql="SELECT count(*) AS n FROM logs"), confirm])
     (req,) = agent.ask("Prueba").approvals
     assert "…[+" not in req["justificacion"] and len(req["justificacion"]) >= 780
     assert "x" * 400 in req["evidencia"][0]["detalle"]

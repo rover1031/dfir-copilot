@@ -47,11 +47,16 @@ HTTP 200 no prueba que se devolvió contenido.
 MÉTODO
 - Al inicio de cada pregunta recibes el estado de las hipótesis del caso (notas previas, no confiables).
 - Pregunta abierta: describe_dataset, luego run_detectors, luego profundiza con profile, run_query y build_timeline.
-- Formula hipótesis con propose_hypothesis (una frase, falsable). Antes de probarla márcala con \
-update_hypothesis(status="en_prueba").
+- Formula hipótesis con propose_hypothesis (una frase, falsable). Debes dar su `falsifier`: el resultado concreto \
+en los datos que la REFUTARÍA, definido ANTES de probarla. Si lo obtienes, refútala; no la rescates con matices. \
+Antes de probarla márcala con update_hypothesis(status="en_prueba").
 - Para dar una hipótesis por confirmada o refutada llama update_hypothesis con status "confirmada" o "refutada", \
 evidence_refs (ids reales) y rationale. Eso NO la cierra: el analista debe aprobarla. Hasta entonces es una \
 hipótesis sin resolver.
+- Para pedir "confirmada" aporta además refutation_checks: al menos una consulta ejecutada DESPUÉS de proponer la \
+hipótesis que buscaba el resultado que la refutaría (ref q-…, would_refute_if: qué la habría refutado, observed: qué \
+observaste). Una consulta anterior a la hipótesis no cuenta. Si no puedes diseñar una prueba que pueda fallar, no la \
+confirmes: dilo.
 - Busca también evidencia que REFUTE tu hipótesis, no solo la que la apoya.
 
 FORMATO (español, conciso): Resumen · Hallazgos con evidencia · Hipótesis y estado · Límites · \
@@ -66,6 +71,14 @@ class ProposeArgs(BaseModel):
     statement: str = Field(min_length=10, max_length=500, description="Hipótesis falsable, en una frase.")
     rationale: str = Field("", max_length=1000, description="Por qué crees que podría ser cierta.")
     test_plan: str = Field("", max_length=1000, description="Cómo la probarías o refutarías.")
+    falsifier: str = Field(min_length=10, max_length=500,
+                           description="Resultado concreto en los datos que la REFUTARÍA; se fija antes de probarla.")
+
+
+class CheckArgs(BaseModel):
+    ref: str = Field(max_length=40, description="Id q-… de la consulta que buscaba refutarla (posterior a la hipótesis).")
+    would_refute_if: str = Field(min_length=10, max_length=400, description="Qué resultado de esa consulta la habría refutado.")
+    observed: str = Field(min_length=10, max_length=400, description="Qué resultado se observó.")
 
 
 class UpdateArgs(BaseModel):
@@ -74,12 +87,14 @@ class UpdateArgs(BaseModel):
     evidence_refs: list[str] = Field(default_factory=list, max_length=20,
                                      description="Ids reales (q-, f-, c-) que respaldan el cambio.")
     rationale: str = Field("", max_length=1000)
+    refutation_checks: list[CheckArgs] = Field(default_factory=list, max_length=10,
+                                               description="Obligatorio para 'confirmada': intentos reales de refutarla.")
 
 
 HYPOTHESIS_TOOLS = {
-    "propose_hypothesis": (ProposeArgs, "Registra una hipótesis nueva (estado: propuesta)."),
+    "propose_hypothesis": (ProposeArgs, "Registra una hipótesis nueva (estado: propuesta) con su criterio de refutación."),
     "update_hypothesis": (UpdateArgs, "Marca una hipótesis 'en_prueba' o pide cerrarla como 'confirmada'/'refutada' "
-                                      "(requiere evidencia y la aprobación del analista)."),
+                                      "(requiere evidencia, para confirmar intentos de refutación, y la aprobación del analista)."),
 }
 
 
@@ -191,10 +206,18 @@ class DfirAgent:
     def hypothesis_context(self) -> str:
         """Estado de las hipótesis. También es texto no confiable (el modelo pudo citar al atacante):
         se sanea para evitar inyección de segundo orden."""
-        items = [{"id": h["hypothesis_id"], "estado": h["status"], "hipotesis": self._visible_statement(h),
-                  "evidencia": h["evidence_refs"]} for h in self.book.all()]
+        items = []
+        for h in self.book.all():
+            item = {"id": h["hypothesis_id"], "estado": h["status"], "hipotesis": self._visible_statement(h),
+                    "evidencia": h["evidence_refs"]}
+            if h.get("falsifier"):  # lo que la refutaría, fijado al proponerla: el agente no debe olvidarlo ni moverlo
+                item["criterio_de_refutacion"] = h["falsifier"] if self._may_show(h) else "[no mostrado]"
+            items.append(item)
         clean, _ = sanitize(items, max_cell=300)
         return render({"hipotesis_del_caso": clean}) if clean else "(sin hipótesis registradas)"
+
+    def _may_show(self, h: dict) -> bool:
+        return self.engine.copy_kind == "real" or h.get("copy") == self.engine.copy_id
 
     def _visible_statement(self, h: dict) -> str:
         """Con la copia seudonimizada, el texto de una hipótesis solo vuelve al modelo si se formuló sobre ESA misma copia.
@@ -202,7 +225,7 @@ class DfirAgent:
         Una hipótesis anterior (escrita cuando el agente veía datos reales, o sobre otra política) puede contener valores que
         la copia oculta; traducir texto libre es poco fiable (¿ese número es un id o una cifra?), así que se tapa. El id y el
         estado se conservan; si interesa, se vuelve a formular con alias."""
-        if self.engine.copy_kind == "real" or h.get("copy") == self.engine.copy_id:
+        if self._may_show(h):
             return h["statement"]
         return "[texto no mostrado: formulada sobre otra copia de los datos; vuelve a formularla con alias si sigue vigente]"
 
@@ -294,14 +317,16 @@ class DfirAgent:
             parsed = model(**args)
             if name == "propose_hypothesis":
                 item, created = self.book.propose(parsed.statement, parsed.rationale, parsed.test_plan,
-                                                  copy=self.engine.copy_id)
+                                                  copy=self.engine.copy_id, falsifier=parsed.falsifier)
                 return reply(ok=True, hypothesis_id=item["hypothesis_id"], estado=item["status"], nueva=created), None
             if parsed.status == "en_prueba":
                 item = self.book.start_testing(parsed.hypothesis_id)
                 return reply(ok=True, hypothesis_id=item["hypothesis_id"], estado=item["status"]), None
-            req = self.book.request_decision(parsed.hypothesis_id, parsed.status, parsed.evidence_refs, parsed.rationale)
+            req = self.book.request_decision(parsed.hypothesis_id, parsed.status, parsed.evidence_refs, parsed.rationale,
+                                             [c.model_dump() for c in parsed.refutation_checks])
             return None, {"tool_call_id": cid, "hypothesis_id": req.hypothesis_id, "to": req.to,
-                          "evidence_refs": list(req.evidence_refs), "rationale": req.rationale}
+                          "evidence_refs": list(req.evidence_refs), "rationale": req.rationale,
+                          "refutation_checks": [dict(c) for c in req.refutation_checks]}
         except (ValidationError, TypeError) as exc:
             return reply(ok=False, error=f"argumentos inválidos: {exc}"), None
         except HypothesisError as exc:
@@ -309,7 +334,8 @@ class DfirAgent:
 
     @staticmethod
     def _request_from(p: dict) -> DecisionRequest:
-        return DecisionRequest(p["hypothesis_id"], p["to"], tuple(p["evidence_refs"]), p["rationale"])
+        return DecisionRequest(p["hypothesis_id"], p["to"], tuple(p["evidence_refs"]), p["rationale"],
+                               tuple(p.get("refutation_checks") or ()))
 
     def _describe_ref(self, ref: str) -> dict:
         for e in self.ledger.entries():
@@ -326,7 +352,10 @@ class DfirAgent:
         h = self.book.get(p["hypothesis_id"])
         view = {"hypothesis_id": p["hypothesis_id"], "hipotesis": h["statement"], "estado_actual": h["status"],
                 "estado_solicitado": p["to"], "justificacion": p["rationale"],
-                "evidencia": [self._describe_ref(r) for r in p["evidence_refs"]]}
+                "evidencia": [self._describe_ref(r) for r in p["evidence_refs"]],
+                "criterio_de_refutacion": h.get("falsifier") or "(sin criterio: formulada antes de existir este requisito)",
+                "intentos_de_refutacion": [{**self._describe_ref(c["ref"]), "habria_refutado_si": c["would_refute_if"],
+                                            "observado": c["observed"]} for c in p.get("refutation_checks") or ()]}
         return sanitize(view, 1500)[0]  # la justificación admite hasta 1000 caracteres: se muestra completa
 
     # --- API para el analista ----------------------------------------------------------------------

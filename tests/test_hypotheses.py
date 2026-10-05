@@ -18,6 +18,14 @@ def env(tmp_path, make_engine):
     return ledger, HypothesisBook(ledger), ref, engine
 
 
+def refute(ledger, engine, sql="SELECT count(DISTINCT user_id) FROM logs"):
+    """Una consulta ejecutada y registrada AHORA (después de proponer): un intento de refutación válido."""
+    engine.query(sql)
+    ledger.record_queries(engine.history[-1:])
+    return [{"ref": ledger.entries("query")[-1]["data"]["query_id"], "would_refute_if": "Hubiera más identidades de las esperadas",
+             "observed": "El recuento coincide con lo esperado"}]
+
+
 def test_proponer_es_idempotente_e_ignora_espacios_y_mayusculas(env):
     _, book, _, _ = env
     item, created = book.propose(STATEMENT)
@@ -34,12 +42,12 @@ def test_longitud_de_la_hipotesis(env, bad):
 
 
 def test_ciclo_de_vida_completo_con_decision_del_analista(env):
-    ledger, book, ref, _ = env
+    ledger, book, ref, engine = env
     hid = book.propose(STATEMENT)[0]["hypothesis_id"]
     assert book.start_testing(hid)["status"] == "en_prueba"
     book.start_testing(hid)  # idempotente: no duplica entradas
     assert len([e for e in ledger.entries("hypothesis_update")]) == 1
-    req = book.request_decision(hid, "confirmada", [ref], "La consulta lo respalda")
+    req = book.request_decision(hid, "confirmada", [ref], "La consulta lo respalda", refute(ledger, engine))
     assert book.get(hid)["status"] == "en_prueba"  # pedir no cambia nada
     item = book.decide(req, approve=True, analyst="eder", note="de acuerdo")
     assert item["status"] == "confirmada" and item["evidence_refs"] == [ref]
@@ -79,10 +87,10 @@ def test_la_peticion_de_cierre_exige_estado_evidencia_y_justificacion(env):
 
 
 def test_el_estado_se_reconstruye_desde_el_ledger(env):
-    ledger, book, ref, _ = env
+    ledger, book, ref, engine = env
     hid = book.propose(STATEMENT)[0]["hypothesis_id"]
     book.start_testing(hid)
-    book.decide(book.request_decision(hid, "confirmada", [ref], "ok"), True, "eder")
+    book.decide(book.request_decision(hid, "confirmada", [ref], "ok", refute(ledger, engine)), True, "eder")
     reborn = HypothesisBook(ledger)
     assert reborn.get(hid)["status"] == "confirmada" and len(reborn.get(hid)["history"]) == 2
 
