@@ -270,6 +270,12 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "es": "La carpeta {path} existe pero no es un caso completo (falta case.json): revísala o bórrala a mano.",
         "en": "Folder {path} exists but is not a complete case (case.json is missing): inspect or delete it by hand.",
     },
+    "decision.derived_gap": {
+        "es": "'{name}' no extrae valor en {rows} filas ({pct}% de las que traen '{param}='): formato distinto al esperado "
+              "o prefijo nuevo. Revisa esas filas antes de confiar en la columna.",
+        "en": "'{name}' extracts no value in {rows} rows ({pct}% of those carrying '{param}='): unexpected format "
+              "or a new prefix. Inspect those rows before trusting the column.",
+    },
     # --- tipos de log ----------------------------------------------------------------------------------------------
     "log_type.web": {"es": "Acceso web / API", "en": "Web / API access"},
     "log_type.proxy": {"es": "Proxy web", "en": "Web proxy"},

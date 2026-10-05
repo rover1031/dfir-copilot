@@ -257,3 +257,53 @@ def test_flujo_completo_inspeccionar_aprobar_ingerir_y_sellar(idor, tmp_path):
 
 def test_el_borrador_del_repositorio_sigue_siendo_valido():
     assert yaml.safe_load((MAPPINGS_DIR / "web_access_meli.yaml").read_text(encoding="utf-8"))["roles"]["actor"] == "user_id"
+
+
+# --- cobertura medida sobre el archivo completo (no solo la muestra) ----------------------------------------------
+def _token_rows(extra_prefix_rows=3, malformed=0):
+    rng = random.Random(1)
+
+    def row(i, token):
+        return (f"2020-{1 + i % 28:02d}-10T10:{i % 60:02d},200,h,/invoices/search?invoice_id={1000 + i % 500}"
+                f"&site_id=MeliCO&authtoken={token},GET,-,Mozilla/5.0,10.0.0.{i % 200}")
+
+    rows = [row(i, f"ATUSER-ID-normal{i % 30:02d}") for i in range(30000)]
+    rows += [row(i, f"TEST-ID-websectest{i % 3}") for i in range(extra_prefix_rows)]
+    rows += [row(i, "basura") for i in range(malformed)]
+    rng.shuffle(rows)
+    return rows
+
+
+def test_un_prefijo_raro_que_no_cae_en_la_muestra_entra_igual_en_la_regex(tmp_path):
+    """Caso real: el grupo secundario usa el prefijo TEST (~0,1 % de las filas). Con una muestra que no lo contiene,
+    la regex dejaba esas cuentas con user_id vacío, sin ningún aviso."""
+    csv = _csv(tmp_path, _token_rows())
+    draft = inspect_source(csv, sample_rows=500)
+    (user,) = [d for d in draft.derived if d.name == "user_id"]
+    assert "(?:ATUSER|TEST)" in user.regex
+    manifest = ingest_file(csv, "d", out_dir=tmp_path / "o", mapping_path=draft.save(tmp_path / "d.yaml"))
+    got = duckdb.connect().execute(f"SELECT count(*) FROM read_parquet('{manifest['output']['path']}') "
+                                   f"WHERE user_id LIKE 'websectest%'").fetchone()[0]
+    assert got == 3
+
+
+def test_las_filas_que_la_regex_no_cubre_se_cuentan_sobre_el_archivo_completo(tmp_path):
+    draft = inspect_source(_csv(tmp_path, _token_rows(malformed=40)), sample_rows=500)
+    gaps = [d for d in draft.decisions if d.code == "derived_coverage_gap"]
+    assert {g.message.split("'")[1] for g in gaps} == {"user_id", "x_authtoken_type"}
+    assert all("40 filas" in g.message and "authtoken=" in g.message for g in gaps) and all(g.level == "review" for g in gaps)
+
+
+def test_un_archivo_limpio_no_genera_avisos_de_cobertura(idor):
+    assert "derived_coverage_gap" not in codes(inspect_source(idor[0]))
+
+
+def test_las_estadisticas_de_las_derivadas_salen_del_archivo_completo(tmp_path):
+    by = {d.name: d for d in inspect_source(_csv(tmp_path, _token_rows()), sample_rows=300).derived}
+    assert by["x_invoice_id"].distinct == 500 and by["x_invoice_id"].hit_pct == 100.0  # la muestra solo ve ~250
+    assert by["user_id"].distinct == 33 and by["user_id"].hit_pct == 100.0              # 30 normales + 3 TEST, exactos
+
+
+def test_el_inspector_funciona_con_una_muestra_mayor_que_el_archivo(tmp_path):
+    draft = inspect_source(_csv(tmp_path, _token_rows(0)), sample_rows=10_000_000)
+    assert draft.status == "ready" and "user_id" in {d.name for d in draft.derived}

@@ -7,7 +7,7 @@ y al analista solo le muestra ejemplos ENMASCARADOS y estadísticas. Al LLM no l
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from dfir_copilot.i18n import resolve_lang, t
@@ -23,8 +23,10 @@ _SEPARATORS = ("-ID-", "_ID_", ":", "|")  # prefijo+SEP+identificador: ATUSER-ID
 _SECRET_KEY = re.compile(r"token|key|pass|pwd|secret|auth|clave|contrase|credential", re.I)
 _VALUE_RX = r"[^&#;\s]"
 MAX_KEYS = 12
+COMPOSITE_MIN_SHARE = 0.8  # fracción de valores con forma prefijo+id para tratar un parámetro como compuesto
 MIN_HIT_PCT = 5.0
 RESOURCE_MIN_DISTINCT = 20
+EXACT_DISTINCT_BELOW = 1000  # por debajo, los distintos se cuentan exactos sobre el archivo completo
 
 
 def _lit(value: str) -> str:
@@ -177,11 +179,13 @@ def _analyze_key(con, key: str) -> dict:
     n, distinct, numeric, *seps = row
     info = {"n": n or 0, "distinct": distinct or 0, "numeric": numeric or 0, "sep": None, "prefixes": []}
     for i, s in enumerate(_SEPARATORS):
-        if n and seps[i] / n >= 0.9:
+        if n and seps[i] / n >= COMPOSITE_MIN_SHARE:
             rx = '^([A-Za-z][A-Za-z0-9]{1,19})' + re.escape(s) + '.+$'
+            # Los prefijos se descubren en TODO el archivo: uno raro (el 0,1 % de las filas) puede no estar en la muestra
+            # y la regex lo dejaría fuera sin avisar.
             prefixes = [r[0] for r in con.execute(
-                f"SELECT DISTINCT regexp_extract(val, {_lit(rx)}, 1) FROM (SELECT {val} AS val FROM __u "
-                f"WHERE v IS NOT NULL) WHERE val <> '' ORDER BY 1 LIMIT 11").fetchall() if r[0]]
+                f"SELECT DISTINCT regexp_extract(val, {_lit(rx)}, 1) FROM (SELECT {val} AS val FROM __full) "
+                f"WHERE regexp_matches(val, {_lit(rx)}) ORDER BY 1 LIMIT 11").fetchall() if r[0]]
             if 1 <= len(prefixes) <= 10:
                 info["sep"], info["prefixes"] = s, prefixes
                 break
@@ -246,6 +250,31 @@ def _derive(con, keys: list[str], taken: set, mapper: SchemaMapper, lang: str):
         if _SECRET_KEY.search(key) and proposals and proposals[-1].key == key:
             decisions.append(Decision("credential_in_url", "review", t("decision.credential_in_url", lang, param=key)))
     return proposals, decisions
+
+
+def _full_stats(con, proposals: list, lang: str) -> tuple[list, list]:
+    """Mide cada derivada sobre el archivo COMPLETO (una pasada): % de filas con valor, distintos y filas que traen el
+    parámetro pero de las que la regex no extrae nada. La muestra decide qué proponer; el archivo completo, qué tan bien."""
+    if not proposals:
+        return proposals, []
+    parts = ["count(v)"]
+    for p in proposals:
+        parts += [f"count(*) FILTER (WHERE strpos(v, {_lit(p.key + '=')}) > 0)",
+                  f"count(*) FILTER (WHERE regexp_extract(v, {_lit(p.regex)}, 1) <> '')",
+                  # exacto si la muestra ve pocos valores (memoria acotada); aproximado si hay muchos
+                  f"{'count(DISTINCT ' if p.distinct < EXACT_DISTINCT_BELOW else 'approx_count_distinct('}"
+                  f"NULLIF(regexp_extract(v, {_lit(p.regex)}, 1), ''))"]
+    total, *vals = con.execute(f"SELECT {', '.join(parts)} FROM __full").fetchone()
+    total = total or 1
+    refined, decisions = [], []
+    for i, p in enumerate(proposals):
+        present, hits, distinct = vals[3 * i: 3 * i + 3]
+        refined.append(replace(p, hit_pct=round(100.0 * hits / total, 1), distinct=int(distinct or 0)))
+        if present > hits:
+            gap = present - hits
+            decisions.append(Decision("derived_coverage_gap", "review", t(
+                "decision.derived_gap", lang, name=p.name, rows=f"{gap:,}", pct=round(100.0 * gap / present, 2), param=p.key)))
+    return refined, decisions
 
 
 # --- orquestación --------------------------------------------------------------------------------------------------
@@ -319,8 +348,10 @@ def inspect_source(path: str | Path, *, lang: str | None = None, profile: DataPr
             expr = leaf_exprs(con, rel)[url_field][0]
             con.execute(f"CREATE TEMP TABLE __u AS SELECT CAST({expr} AS VARCHAR) AS v FROM {rel} AS src "
                         f"USING SAMPLE reservoir({int(sample_rows)} ROWS) REPEATABLE (42)")
+            con.execute(f"CREATE TEMP VIEW __full AS SELECT CAST({expr} AS VARCHAR) AS v FROM {rel} AS src")
             derived, extra = _derive(con, by_path[url_field].url_param_keys, set(fields), mapper, lang)
-            decisions += extra
+            derived, gaps = _full_stats(con, derived, lang)
+            decisions += extra + gaps
         finally:
             con.close()
 

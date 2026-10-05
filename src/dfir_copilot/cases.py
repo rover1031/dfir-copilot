@@ -168,7 +168,7 @@ class CaseWorkspace:
         if not source_file.exists():
             raise FileNotFoundError(source_file)
         shutil.copyfile(source_file, self.mapping_path)
-        manifest = ingest_file(path, source=str(mapping), out_dir=self.processed_dir, memory_limit=memory_limit,
+        manifest = ingest_file(path, source=source_file.stem, out_dir=self.processed_dir, memory_limit=memory_limit,
                                mapping_path=self.mapping_path, overwrite=True)  # el caso no está sellado: se puede rehacer
         meta = self.meta
         meta["dataset"] = {"parquet": Path(manifest["output"]["path"]).name,

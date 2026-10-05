@@ -118,15 +118,16 @@ de parámetros pueden ser descriptivos. Ambos son metadatos de esquema, no regis
 * **Nuevo formato de fecha:** añadirlo a `STRPTIME_FORMATS` (y a `DAY_MONTH_PAIRS` si puede confundir día y mes).
 * **Nuevo tipo semántico:** patrón RE2 en `SEMANTIC_PATTERNS`; si es dato personal, añadirlo a `_PII`.
 
-## 9. Estado de P0 y pendientes
+## 9. Plan por fases
 
-| Bloque | Contenido | Estado |
+| Fase | Contenido | Estado |
 |---|---|---|
-| **P0-A** | Perfilado local multi-formato, mapeo bilingüe, Data Profile | Hecho |
-| **P0-B2** | Espacio por caso, integridad ledger/dataset, huella de resultados, roles de detectores | Hecho (§12) |
-| **P0-B1** | Inspector (borrador de mapping con campos derivados de la URL) e ingestor multi-formato con rutas anidadas | Hecho (§13) |
-| Fase LLM | Herramienta del agente que recibe el Data Profile y devuelve clasificación, mapeo y consultas | Pendiente |
-| P1/P2 | Prompts y reporte bilingües | Pendiente |
+| **P0** | Generalización e integridad: perfilado local multi-formato y mapeo bilingüe (A), espacio por caso, integridad ledger/dataset, huella de resultados y roles (B2), Inspector e ingestor multi-formato (B1) | Hecho (§12, §13) |
+| **P1** | Agente. **Fase LLM**: una llamada que recibe solo el Data Profile y devuelve clasificación del log, confirmación del mapeo y consultas SQL propuestas (validadas con pydantic y ejecutadas en el motor seguro). Prompts bilingües que respetan el prefijo estable. Notas del analista visibles en cada pregunta, regla de falsabilidad, tope de tokens por pregunta, conversación persistente en disco | Pendiente |
+| **P2** | Entrega: reporte Markdown bilingüe generado desde el ledger, README, CLI (`dfir ingest`, `dfir ask`), `nbstripout` | Pendiente |
+| **P3** | Ampliación: logs no web (autenticación, EDR, firewall) con esquema canónico propio, Excel, GeoIP offline, inteligencia en PDF | Pendiente |
+
+La fase LLM es P1, no P0: P0 termina en el perfil, el mapeo y el borrador de mapping, que ya es lo que se enviaría al modelo.
 
 ## 10. Lecciones del primer archivo real (exportación de Falcon / LogScale)
 
@@ -246,6 +247,15 @@ en una conexión DuckDB restringida a ese archivo y lo único que se muestra son
 Reglas para no inventar: una identidad exige que el valor se repita entre peticiones (un token único por fila no es un
 actor); parámetros presentes en menos del 5 % de las filas se ignoran; el tope es de 12 parámetros.
 
+**La muestra decide qué proponer; el archivo completo mide qué tan bien.** Una muestra de 20 000 filas puede no contener
+un prefijo raro (p. ej. `TEST`, el 0,1 % de las filas): la regex lo dejaría fuera y esas cuentas quedarían con `user_id`
+vacío sin ningún aviso. Por eso, tras proponer, el Inspector hace dos pasadas por el archivo completo:
+
+1. **Descubre los prefijos** de los parámetros compuestos en todo el archivo (hasta 10; más de 10 no es un vocabulario).
+2. **Mide cada derivada**: % de filas con valor, valores distintos (exactos hasta 1 000, aproximados por encima) y
+   cuántas filas traen el parámetro pero la regex no extrae nada → decisión `derived_coverage_gap` con el recuento exacto.
+   Un token malformado o un prefijo nuevo se ve ahí, no se pierde.
+
 ### 13.3 Decisiones
 
 Cada una lleva un código estable (inglés) y un nivel. **required** bloquea el estado `ready`; **review** no, pero queda
@@ -260,6 +270,7 @@ escrita en el YAML.
 | `timezone_unverified` | review | La fecha no trae zona horaria |
 | `mapping_ambiguous` | review | Dos columnas compiten por el mismo campo |
 | `derived_identity`, `credential_in_url` | review | Se extrae una identidad de un parámetro; credencial expuesta en el log |
+| `derived_coverage_gap` | review | Hay filas con el parámetro de las que la regex no extrae valor (formato inesperado o prefijo nuevo) |
 | `unsupported_fields` | review | Campos reconocidos que el esquema no incluye |
 
 ### 13.4 Ingestor multi-formato
@@ -285,11 +296,11 @@ no, con la misma lectura que el perfilador. Novedades del mapping:
 
 * **Solo logs web.** El esquema canónico tiene 13 campos web. La telemetría de EDR, firewall o autenticación se
   reconoce y se perfila, pero el Inspector la declara `unsupported`; necesita su propio esquema (pendiente P3).
-* **Los derivados se infieren de una muestra** (20 000 filas por defecto, reproducible). Los parámetros raros que no
-  aparezcan en la muestra no se proponen.
+* **Qué se propone sale de una muestra** (20 000 filas por defecto, reproducible): un parámetro presente solo en filas
+  que la muestra no contiene no se propone. Los prefijos y la cobertura sí se verifican en el archivo completo.
 * **Prefijo+id solo con separadores conocidos:** `-ID-`, `_ID_`, `:` y `|`.
 * **El JSON tipado pierde la zona:** DuckDB convierte una fecha ISO a `TIMESTAMP` sin zona; el Inspector lo marca
   `timezone_unverified`.
 * **La hora sigue siendo una decisión humana.** Ningún código puede saber en qué zona exportó el sistema de origen.
-* **Tiempo:** unos 30 s sobre un CSV de 1 GB y 4,5 M de filas en un solo núcleo (perfil + análisis de valores), 0,2 GB
-  de RAM; la ingesta tarda unos 30 s y usa hasta el límite de memoria configurado (2 GB).
+* **Tiempo:** unos 35 s sobre un CSV de 1 GB y 4,5 M de filas en un solo núcleo (perfil + muestra + dos pasadas
+  completas), 0,2 GB de RAM; la ingesta tarda unos 30 s y usa hasta el límite de memoria configurado (2 GB).
