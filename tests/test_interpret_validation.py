@@ -48,13 +48,14 @@ def codes(reviewed, kind=None):
 
 
 # --- columnas del gemelo vacío -------------------------------------------------------------------------------------
-def test_las_columnas_son_las_mapeadas_mas_source_row_y_timestamp(columns):
-    assert list(columns) == ["source_row", "timestamp_utc", "src_ip", "user_id", "endpoint", "status_code", "x_invoice_id"]
+def test_las_columnas_son_las_mapeadas_traducidas_a_la_tabla_mas_source_row_y_timestamp(columns):
+    assert list(columns) == ["source_row", "timestamp_utc", "src_ip", "user_id", "endpoint", "query_string", "status_code",
+                             "timestamp_raw", "x_invoice_id"]
     assert columns["timestamp_utc"] == "TIMESTAMPTZ" and columns["x_invoice_id"] == "VARCHAR"
 
 
 def test_sin_marca_de_tiempo_en_el_perfil_no_hay_timestamp_utc():
-    assert "timestamp_utc" not in columns_from_profile(make_profile({"endpoint": "path"}, with_timestamp=False))
+    assert "timestamp_utc" not in columns_from_profile(make_profile({"uri": "path"}, with_timestamp=False))
 
 
 @pytest.mark.parametrize("derived", [
@@ -212,7 +213,7 @@ def test_sin_sandbox_propio_la_revision_crea_y_cierra_el_suyo(columns):
 
 
 def test_una_consulta_sobre_una_columna_no_mapeada_falla_aqui_y_no_en_la_investigacion():
-    profile = make_profile({"endpoint": "path"}, with_timestamp=False)
+    profile = make_profile({"uri": "path"}, with_timestamp=False)
     out = review_interpretation(interp(proposed_queries=[query("por_usuario", "SELECT user_id FROM logs")]),
                                 profile, columns_from_profile(profile))
     assert out.interpretation.proposed_queries == [] and codes(out) == [("por_usuario", "sql_error")]

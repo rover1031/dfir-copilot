@@ -6,9 +6,10 @@ decisión, que podría arrastrar valores.
 """
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable
 
-from dfir_copilot.interpret.validation import columns_from_profile
+from dfir_copilot.interpret.validation import EXTRA_COLUMNS, columns_from_profile, profile_vocabulary
 from dfir_copilot.profiling.data_profile import DataProfile
 from dfir_copilot.schema import CANONICAL_FIELDS, CANONICAL_NAMES
 
@@ -28,13 +29,14 @@ def columns_for(profile: DataProfile, derived: Iterable = ()) -> dict[str, str]:
     columns = columns_from_profile(profile, extras)
     if not canonical_derived:
         return columns
-    ordered = {f.name: f.dtype for f in CANONICAL_FIELDS if f.name in columns or f.name in canonical_derived}
-    ordered.update({name: dtype for name, dtype in columns.items() if name in extras})
+    canonical_dtype = {f.name: f.dtype for f in CANONICAL_FIELDS} | {n: dt for n, (dt, _) in EXTRA_COLUMNS.items()}
+    ordered = {n: canonical_dtype[n] for n in canonical_dtype if n in columns or n in canonical_derived}
+    ordered.update({name: dtype for name, dtype in columns.items() if name not in ordered})
     return ordered
 
 
 def _describe_columns(columns: dict[str, str], derived: Iterable) -> str:
-    canon = {f.name: f.description for f in CANONICAL_FIELDS}
+    canon = {f.name: f.description for f in CANONICAL_FIELDS} | {n: d for n, (_, d) in EXTRA_COLUMNS.items()}
     by_name = {d.name: d for d in derived}
     lines = []
     for name, dtype in columns.items():
@@ -54,6 +56,19 @@ def build_user_message(profile: DataProfile, derived: Iterable, columns: dict[st
     derived = list(derived)
     return (
         f"<lang>{lang}</lang>\n"
+        f"<canonical_names>{', '.join(sorted(profile_vocabulary()))}</canonical_names>\n"
         f"<columns>\n{_describe_columns(columns, derived)}\n</columns>\n"
         f"<data_profile>\n{profile.to_llm_json()}\n</data_profile>"
     )
+
+
+# Caracteres por token, medido en una llamada real (claude-sonnet-5-5, perfil de 8 campos): 12 326 caracteres entre sistema,
+# usuario y esquema JSON dieron 5 956 tokens de entrada. Es una estimación gruesa (el texto en español y el JSON tokenizan peor
+# que el inglés corriente); sirve para ver el orden de magnitud antes de enviar, no para facturar.
+CHARS_PER_TOKEN = 2.1
+
+
+def estimate_tokens(*parts: str | dict) -> int:
+    """Tokens de entrada aproximados de lo que se enviaría (los diccionarios se cuentan como el JSON compacto)."""
+    chars = sum(len(p if isinstance(p, str) else json.dumps(p, ensure_ascii=False, separators=(",", ":"))) for p in parts)
+    return round(chars / CHARS_PER_TOKEN)

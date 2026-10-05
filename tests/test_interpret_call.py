@@ -1,9 +1,8 @@
 """P1-a, entrega 2: qué ve el modelo, cómo se le llama y qué se hace con su respuesta. Sin red: modelo simulado."""
 import json
-from dataclasses import dataclass
 
 import pytest
-from interp_helpers import make_profile
+from interp_helpers import GOOD, INVOICE, USER, Derived, Scripted, make_profile, ok
 
 from dfir_copilot.interpret import (
     PROMPT_VERSION,
@@ -18,60 +17,16 @@ from dfir_copilot.interpret import (
 )
 
 
-@dataclass
-class Derived:
-    """Misma forma que `profiling.inspector.DerivedProposal`."""
-
-    name: str
-    regex: str
-    type: str
-    role: str
-    reason: str
-    key: str
-    hit_pct: float
-    distinct: int
-    examples: tuple = ()
-
-
-USER = Derived("user_id", "REGEX-SECRETA-1", "VARCHAR", "canonical", "RAZON-LIBRE-1", "authtoken", 100.0, 35, ("an*******",))
-INVOICE = Derived("x_invoice_id", "REGEX-SECRETA-2", "VARCHAR", "resource", "RAZON-LIBRE-2", "invoice_id", 99.9, 5025, ("11*****",))
-
-GOOD = {
-    "classification": {"log_type": "web_access", "confidence": 0.9, "evidence_fields": ["path", "code"], "rationale": "r"},
-    "mapping_review": [{"action": "confirm", "canonical": "endpoint", "field": "path", "reason": "r"}],
-    "proposed_queries": [{
-        "id": "facturas_por_usuario", "hypothesis": "h", "priority": "high", "expected_if_true": "e", "refuted_if": "r",
-        "sql": "SELECT user_id, count(DISTINCT x_invoice_id) AS n FROM logs GROUP BY 1 ORDER BY n DESC LIMIT 20",
-    }],
-    "analyst_questions": [{"question": "¿Qué zona horaria?", "why_it_matters": "w"}],
-}
-
-
-class Scripted:
-    """Modelo simulado: devuelve respuestas preparadas y recuerda con qué se le llamó."""
-
-    def __init__(self, *replies):
-        self.replies, self.calls = list(replies), []
-
-    def invoke(self, system, user, schema):
-        self.calls.append((system, user, schema))
-        return self.replies.pop(0)
-
-
-def ok(data=None, usage=None):
-    return StructuredReply(GOOD if data is None else data, usage or {"input_tokens": 1200, "output_tokens": 400, "total_tokens": 1600})
-
-
 # --- columnas ------------------------------------------------------------------------------------------------------
 def test_una_derivada_canonica_entra_con_su_tipo_canonico_y_en_orden():
-    profile = make_profile({"timestamp_utc": "ts", "endpoint": "path"})        # el perfil no mapea user_id
+    profile = make_profile({"timestamp": "ts", "uri": "path"})        # el perfil no mapea user_id
     cols = columns_for(profile, [USER, INVOICE])
-    assert list(cols) == ["source_row", "timestamp_utc", "user_id", "endpoint", "x_invoice_id"]
+    assert list(cols) == ["source_row", "timestamp_utc", "user_id", "endpoint", "query_string", "timestamp_raw", "x_invoice_id"]
     assert cols["user_id"] == "VARCHAR" and cols["x_invoice_id"] == "VARCHAR"
 
 
 def test_sin_derivadas_las_columnas_son_las_del_perfil():
-    assert columns_for(make_profile({"endpoint": "path"}, with_timestamp=False)) == {"source_row": "BIGINT", "endpoint": "VARCHAR"}
+    assert columns_for(make_profile({"uri": "path"}, with_timestamp=False)) == {"source_row": "BIGINT", "endpoint": "VARCHAR", "query_string": "VARCHAR"}
 
 
 def test_dos_derivadas_con_el_mismo_nombre_se_rechazan():
@@ -88,7 +43,7 @@ def test_una_derivada_con_tipo_no_admitido_se_rechaza():
 def test_el_mensaje_lleva_idioma_columnas_y_el_perfil_tal_cual():
     profile = make_profile()
     msg = build_user_message(profile, [USER, INVOICE], columns_for(profile, [USER, INVOICE]), "es")
-    assert msg.startswith("<lang>es</lang>\n<columns>\n") and f"<data_profile>\n{profile.to_llm_json()}\n</data_profile>" in msg
+    assert msg.startswith("<lang>es</lang>\n<canonical_names>") and "\n<columns>\n" in msg and f"<data_profile>\n{profile.to_llm_json()}\n</data_profile>" in msg
     assert "x_invoice_id VARCHAR - derived from URL parameter 'invoice_id'; role=resource; present in 99.9% of rows; 5025 distinct values" in msg
     assert "user_id VARCHAR - derived from URL parameter 'authtoken' (canonical column); role=canonical" in msg
     assert "endpoint VARCHAR - Ruta sin query string" in msg
@@ -136,7 +91,7 @@ def test_el_prompt_de_sistema_es_identico_con_cualquier_idioma_o_perfil():
     llm = Scripted(ok(), ok(), ok())
     interpret_profile(llm, make_profile(), lang="es")
     interpret_profile(llm, make_profile(), lang="en")
-    interpret_profile(llm, make_profile({"endpoint": "path"}, with_timestamp=False), lang="en")
+    interpret_profile(llm, make_profile({"uri": "path"}, with_timestamp=False), lang="en")
     assert len({system for system, _, _ in llm.calls}) == 1 and [c[1][:12] for c in llm.calls] == ["<lang>es</la", "<lang>en</la", "<lang>en</la"]
 
 
@@ -169,7 +124,7 @@ def test_lo_que_el_modelo_inventa_se_descarta_y_se_anota():
 
 
 def test_la_derivada_canonica_hace_valida_una_consulta_sobre_user_id_aunque_el_perfil_no_la_mapee():
-    profile = make_profile({"timestamp_utc": "ts", "endpoint": "path"})
+    profile = make_profile({"timestamp": "ts", "uri": "path"})
     assert interpret_profile(Scripted(ok()), profile, derived=[USER, INVOICE]).reviewed.discarded == ()
     sin_derivadas = interpret_profile(Scripted(ok()), profile)                      # sin Inspector, user_id no existe
     assert [c for _, c in [(d.ref, d.code) for d in sin_derivadas.reviewed.discarded]] == ["sql_error"]

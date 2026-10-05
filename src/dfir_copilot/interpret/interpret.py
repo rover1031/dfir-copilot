@@ -14,6 +14,7 @@ from dfir_copilot.interpret.schemas import ProfileInterpretation, wire_schema
 from dfir_copilot.interpret.structured import StructuredLLM
 from dfir_copilot.interpret.validation import ReviewedInterpretation, SqlSandbox, review_interpretation
 from dfir_copilot.profiling.data_profile import DataProfile
+from dfir_copilot.schema import CANONICAL_NAMES
 
 
 @dataclass(frozen=True)
@@ -62,5 +63,6 @@ def interpret_profile(
     except ValidationError as exc:
         first = exc.errors()[0]
         return failed("schema_violation", f"{exc.error_count()} error(es); el primero en {'.'.join(map(str, first['loc']))}: {first['msg']}")
-    reviewed = review_interpretation(raw, profile, columns, sandbox=sandbox)
+    derived_canonical = {d.name for d in derived if d.name in CANONICAL_NAMES}
+    reviewed = review_interpretation(raw, profile, columns, sandbox=sandbox, derived_canonical=derived_canonical)
     return InterpretationResult(reviewed, None, None, reply.usage, elapsed, columns, PROMPT_VERSION)

@@ -14,9 +14,10 @@ ejecución que dependen de los valores (una conversión que falla con datos real
 """
 from __future__ import annotations
 
+import functools
 import re
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -26,6 +27,7 @@ import duckdb
 from dfir_copilot.engine.query_engine import QueryEngine, QueryRejected, QueryTimeout
 from dfir_copilot.interpret.schemas import MAX_QUERIES, MAX_QUESTIONS, ProfileInterpretation
 from dfir_copilot.profiling.data_profile import DataProfile
+from dfir_copilot.profiling.schema_mapper import SchemaMapper
 from dfir_copilot.schema import CANONICAL_FIELDS, CANONICAL_NAMES
 
 # Tipos admitidos para columnas derivadas: el nombre del tipo termina dentro de un CAST, así que va en lista cerrada.
@@ -37,19 +39,34 @@ _LOGS_RE = re.compile(r"\blogs\b", re.IGNORECASE)
 _PRIORITY = {"high": 0, "medium": 1, "low": 2}
 
 
-def columns_from_profile(profile: DataProfile, derived: Mapping[str, str] | None = None) -> dict[str, str]:
-    """Columnas que el dataset ingerido tendrá, con su tipo DuckDB: las canónicas que el perfil mapea, más
-    `source_row` y `timestamp_utc` si hay marca de tiempo, más las derivadas (`x_...`) que se pasen.
+# El perfilador y la tabla ingerida hablan vocabularios distintos. El perfilador nombra lo que ve EN EL ARCHIVO (`timestamp`,
+# `uri`, `dst_ip`...: las claves de aliases.yaml); la tabla usa el esquema canónico (`timestamp_utc`, `endpoint`...). Casi todos
+# coinciden; estos dos no: el ingestor normaliza la fecha a UTC (conservando el texto original) y parte la URL en ruta y query.
+TABLE_COLUMNS = {"timestamp": ("timestamp_utc", "timestamp_raw"), "uri": ("endpoint", "query_string")}
+# Columnas que el ingestor añade y no están en `schema.CANONICAL_FIELDS`: (tipo, descripción).
+EXTRA_COLUMNS = {"timestamp_raw": ("VARCHAR", "Original timestamp text as found in the file, before normalizing to UTC")}
 
-    Se restringe a lo mapeado a propósito: una consulta sobre una columna que el log no aporta debe fallar aquí y no
-    devolver un vacío silencioso en la investigación.
+
+@functools.cache
+def profile_vocabulary() -> frozenset[str]:
+    """Nombres canónicos del PERFILADOR (las claves de aliases.yaml): los que aparecen en `profile.mapping[].canonical`."""
+    return frozenset(SchemaMapper().canon)
+
+
+def columns_from_profile(profile: DataProfile, derived: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Columnas que el dataset ingerido tendrá, con su tipo DuckDB: las que salen de lo que el perfil mapea (traducidas del
+    vocabulario del perfilador al de la tabla), más `source_row`, más las derivadas (`x_...`) que se pasen.
+
+    Se restringe a lo mapeado a propósito: el Parquet real trae TODAS las columnas canónicas, pero las no mapeadas van vacías;
+    una consulta sobre ellas debe fallar aquí y no devolver un vacío silencioso en la investigación.
     """
-    dtypes = {f.name: f.dtype for f in CANONICAL_FIELDS}
+    dtypes = {f.name: f.dtype for f in CANONICAL_FIELDS} | {n: dt for n, (dt, _) in EXTRA_COLUMNS.items()}
     wanted = {"source_row"}
     if profile.timestamp is not None:
-        wanted.add("timestamp_utc")
-    wanted |= {m.canonical for m in profile.mapping if m.canonical in dtypes}
-    columns = {f.name: f.dtype for f in CANONICAL_FIELDS if f.name in wanted}
+        wanted |= set(TABLE_COLUMNS["timestamp"])
+    for m in profile.mapping:
+        wanted |= set(TABLE_COLUMNS.get(m.canonical, (m.canonical,)))
+    columns = {name: dtypes[name] for name in (*CANONICAL_NAMES, *EXTRA_COLUMNS) if name in wanted}
     for name, dtype in (derived or {}).items():
         if not _COLUMN_RE.match(name):
             raise ValueError(f"Nombre de columna derivada inválido: {name!r}")
@@ -133,14 +150,18 @@ class ReviewedInterpretation:
     discarded: tuple[Discard, ...]
 
 
-def _review_mapping(item, profile: DataProfile, fields: set[str]) -> tuple[str, str] | None:
-    """Devuelve (código, detalle) si la opinión sobre el mapeo no se sostiene contra el perfil; None si es válida."""
-    if item.canonical not in CANONICAL_NAMES:
-        return "unknown_canonical", f"{item.canonical!r} no es un campo canónico"
+def _review_mapping(item, profile: DataProfile, fields: set[str], derived_canonical: Collection[str]) -> tuple[str, str] | None:
+    """Devuelve (código, detalle) si la opinión sobre el mapeo no se sostiene contra el perfil; None si es válida.
+
+    `canonical` se compara con el vocabulario del PERFILADOR (el de `profile.mapping`), no con el de la tabla. Una columna
+    canónica que el Inspector derivó de otra (p. ej. `user_id` desde `authtoken`) cuenta como ya mapeada.
+    """
+    if item.canonical not in profile_vocabulary():
+        return "unknown_canonical", f"{item.canonical!r} no es un nombre canónico del perfilador"
     if item.field not in fields:
         return "unknown_field", f"{item.field!r} no está en el perfil"
     pairs = {(m.canonical, m.field) for m in profile.mapping}
-    mapped = {m.canonical for m in profile.mapping}
+    mapped = {m.canonical for m in profile.mapping} | set(derived_canonical)
     if item.action in ("confirm", "reject") and (item.canonical, item.field) not in pairs:
         return "not_in_profile_mapping", f"El perfil no mapea {item.canonical!r} a {item.field!r}"
     if item.action == "change" and item.canonical not in mapped:
@@ -158,6 +179,7 @@ def review_interpretation(
     max_queries: int = MAX_QUERIES,
     max_questions: int = MAX_QUESTIONS,
     sandbox: SqlSandbox | None = None,
+    derived_canonical: Collection[str] = (),
 ) -> ReviewedInterpretation:
     """Contrasta la propuesta del modelo con el perfil y con el esquema. No modifica `raw`."""
     fields = {f.path for f in profile.fields}
@@ -175,7 +197,7 @@ def review_interpretation(
     # --- mapeo
     mapping = []
     for item in raw.mapping_review:
-        problem = _review_mapping(item, profile, fields)
+        problem = _review_mapping(item, profile, fields, derived_canonical)
         if problem:
             discarded.append(Discard("mapping", f"{item.action}:{item.canonical}", *problem))
         else:

@@ -1,0 +1,445 @@
+{
+ "profile_version": "1.0",
+ "lang": "es",
+ "generated_at_utc": "2026-10-05T14:56:11+00:00",
+ "privacy": {
+  "mode": "strict",
+  "raw_values_included": false,
+  "notes": [
+   "Modo estricto: el perfil no contiene valores crudos del log; solo estadísticas, formas abstractas (letras→a, dígitos→9) y nombres de campos o parámetros.",
+   "Solo se listan valores de campos categóricos cuando todos pertenecen a un vocabulario técnico cerrado (métodos HTTP, códigos de estado, acciones como allow/deny)."
+  ]
+ },
+ "source": {
+  "file_name": "three_months.csv",
+  "sha256": "128f5d7d57ce8ee30d2d22df2c6f43552963b55c44e3e560f6db8032aca9841a",
+  "size_bytes": 1180816975,
+  "format": "csv",
+  "encoding": "utf-8",
+  "delimiter": ",",
+  "has_header": true
+ },
+ "dataset": {
+  "row_count": 4478619,
+  "field_count": 8,
+  "profiled_fields": 8,
+  "sample_rows": 10000,
+  "nested": false,
+  "fields_in_payload": 8
+ },
+ "fields": [
+  {
+   "path": "timestamp",
+   "type": "VARCHAR",
+   "null_pct": 0.0,
+   "distinct_approx": 165147,
+   "length": {
+    "min": 16,
+    "max": 16,
+    "avg": 16.0
+   },
+   "numeric_pct": 0.0,
+   "semantics": [],
+   "shapes": [
+    {
+     "name": "9-9-9a9:9",
+     "pct": 100.0
+    }
+   ],
+   "url_param_keys": [],
+   "pii": [],
+   "secret_in_values_pct": 0.0,
+   "timestamp_format": "%Y-%d-%mT%H:%M",
+   "timestamp_pct": 100.0,
+   "mapped_to": "timestamp",
+   "mapping_score": 1.0
+  },
+  {
+   "path": "http_staus",
+   "type": "VARCHAR",
+   "null_pct": 0.0,
+   "distinct_approx": 7,
+   "length": {
+    "min": 3,
+    "max": 3,
+    "avg": 3.0
+   },
+   "numeric_pct": 100.0,
+   "semantics": [
+    {
+     "name": "http_status",
+     "pct": 100.0
+    }
+   ],
+   "shapes": [
+    {
+     "name": "9",
+     "pct": 100.0
+    }
+   ],
+   "url_param_keys": [],
+   "enum_values": [
+    "200",
+    "201",
+    "202",
+    "304",
+    "400",
+    "401",
+    "406",
+    "408"
+   ],
+   "pii": [],
+   "secret_in_values_pct": 0.0,
+   "mapped_to": "status_code",
+   "mapping_score": 0.55
+  },
+  {
+   "path": "http_host",
+   "type": "VARCHAR",
+   "null_pct": 0.0,
+   "distinct_approx": 1,
+   "length": {
+    "min": 16,
+    "max": 16,
+    "avg": 16.0
+   },
+   "numeric_pct": 0.0,
+   "semantics": [
+    {
+     "name": "domain",
+     "pct": 100.0
+    }
+   ],
+   "shapes": [
+    {
+     "name": "a.a",
+     "pct": 100.0
+    }
+   ],
+   "url_param_keys": [],
+   "pii": [],
+   "secret_in_values_pct": 0.0,
+   "mapped_to": "host",
+   "mapping_score": 1.0
+  },
+  {
+   "path": "http_uri",
+   "type": "VARCHAR",
+   "null_pct": 0.0,
+   "distinct_approx": 598318,
+   "length": {
+    "min": 81,
+    "max": 88,
+    "avg": 83.1
+   },
+   "numeric_pct": 0.0,
+   "semantics": [
+    {
+     "name": "uri_path",
+     "pct": 100.0
+    }
+   ],
+   "shapes": [
+    {
+     "name": "/a/a?a_a=9&a_a=a&a=a-a-a",
+     "pct": 100.0
+    }
+   ],
+   "url_param_keys": [
+    "authtoken",
+    "invoice_id",
+    "site_id"
+   ],
+   "pii": [],
+   "secret_in_values_pct": 100.0,
+   "mapped_to": "uri",
+   "mapping_score": 1.0
+  },
+  {
+   "path": "http_method",
+   "type": "VARCHAR",
+   "null_pct": 0.0,
+   "distinct_approx": 1,
+   "length": {
+    "min": 3,
+    "max": 3,
+    "avg": 3.0
+   },
+   "numeric_pct": 0.0,
+   "semantics": [
+    {
+     "name": "http_method",
+     "pct": 100.0
+    }
+   ],
+   "shapes": [
+    {
+     "name": "a",
+     "pct": 100.0
+    }
+   ],
+   "url_param_keys": [],
+   "enum_values": [
+    "GET"
+   ],
+   "pii": [],
+   "secret_in_values_pct": 0.0,
+   "mapped_to": "http_method",
+   "mapping_score": 1.0
+  },
+  {
+   "path": "http_referer",
+   "type": "VARCHAR",
+   "null_pct": 0.2,
+   "distinct_approx": 2,
+   "length": {
+    "min": 10,
+    "max": 32,
+    "avg": 31.9
+   },
+   "numeric_pct": 0.0,
+   "semantics": [
+    {
+     "name": "url",
+     "pct": 99.8
+    }
+   ],
+   "shapes": [
+    {
+     "name": "a://a.a/a",
+     "pct": 99.8
+    },
+    {
+     "name": "a.a",
+     "pct": 0.2
+    }
+   ],
+   "url_param_keys": [],
+   "pii": [],
+   "secret_in_values_pct": 0.0,
+   "mapped_to": "referer",
+   "mapping_score": 1.0
+  },
+  {
+   "path": "http_user_agent",
+   "type": "VARCHAR",
+   "null_pct": 0.0,
+   "distinct_approx": 10,
+   "length": {
+    "min": 4,
+    "max": 115,
+    "avg": 89.1
+   },
+   "numeric_pct": 0.0,
+   "semantics": [
+    {
+     "name": "user_agent",
+     "pct": 100.0
+    }
+   ],
+   "shapes": [
+    {
+     "name": "a/9.9 (a a.a; a9; a9; a:9.9) a/9 a/9.9",
+     "pct": 20.4
+    },
+    {
+     "name": "a/9.9 (a a 9.9; a9) a/9.9 (a, a a) a/9.9.9.9 a/9.9",
+     "pct": 20.1
+    },
+    {
+     "name": "a/9.9 (a; a a a a.a; a:9.9) a/9 a/9.9",
+     "pct": 19.6
+    }
+   ],
+   "url_param_keys": [],
+   "pii": [],
+   "secret_in_values_pct": 0.0,
+   "mapped_to": "user_agent",
+   "mapping_score": 1.0
+  },
+  {
+   "path": "source_ip",
+   "type": "VARCHAR",
+   "null_pct": 0.0,
+   "distinct_approx": 6267,
+   "length": {
+    "min": 7,
+    "max": 15,
+    "avg": 12.0
+   },
+   "numeric_pct": 0.0,
+   "semantics": [
+    {
+     "name": "ipv4",
+     "pct": 100.0
+    }
+   ],
+   "shapes": [
+    {
+     "name": "9.9.9.9",
+     "pct": 100.0
+    }
+   ],
+   "url_param_keys": [],
+   "pii": [
+    "ip_address"
+   ],
+   "secret_in_values_pct": 0.0,
+   "mapped_to": "src_ip",
+   "mapping_score": 1.0
+  }
+ ],
+ "timestamp": {
+  "field": "timestamp",
+  "format": "%Y-%d-%mT%H:%M",
+  "parse_pct_sample": 100.0,
+  "parse_pct_full": 100.0,
+  "min_utc": "2020-10-01 00:00:00+00",
+  "max_utc": "2020-12-31 23:59:00+00",
+  "timezone_in_data": false,
+  "alternatives": [
+   {
+    "name": "iso8601",
+    "pct": 38.7
+   },
+   {
+    "name": "%Y-%m-%dT%H:%M",
+    "pct": 38.7
+   }
+  ]
+ },
+ "mapping": [
+  {
+   "canonical": "timestamp",
+   "field": "timestamp",
+   "score": 1.0,
+   "method": "alias",
+   "evidence": [
+    "alias:timestamp",
+    "semantics:timestamp"
+   ]
+  },
+  {
+   "canonical": "src_ip",
+   "field": "source_ip",
+   "score": 1.0,
+   "method": "alias",
+   "evidence": [
+    "alias:source_ip",
+    "semantics:ipv4"
+   ]
+  },
+  {
+   "canonical": "host",
+   "field": "http_host",
+   "score": 1.0,
+   "method": "alias",
+   "evidence": [
+    "alias:http_host",
+    "semantics:domain"
+   ]
+  },
+  {
+   "canonical": "http_method",
+   "field": "http_method",
+   "score": 1.0,
+   "method": "alias",
+   "evidence": [
+    "alias:http_method",
+    "semantics:http_method"
+   ]
+  },
+  {
+   "canonical": "uri",
+   "field": "http_uri",
+   "score": 1.0,
+   "method": "alias",
+   "evidence": [
+    "alias:http_uri",
+    "semantics:uri_path"
+   ]
+  },
+  {
+   "canonical": "status_code",
+   "field": "http_staus",
+   "score": 0.55,
+   "method": "semantic",
+   "evidence": [
+    "semantics_only:http_status"
+   ]
+  },
+  {
+   "canonical": "user_agent",
+   "field": "http_user_agent",
+   "score": 1.0,
+   "method": "alias",
+   "evidence": [
+    "alias:http_user_agent",
+    "semantics:user_agent"
+   ]
+  },
+  {
+   "canonical": "referer",
+   "field": "http_referer",
+   "score": 1.0,
+   "method": "alias",
+   "evidence": [
+    "alias:http_referer",
+    "semantics:url"
+   ]
+  }
+ ],
+ "ambiguous": [],
+ "unmapped_fields": [],
+ "log_type_hints": [
+  {
+   "type": "web",
+   "label": "Acceso web / API",
+   "score": 1.0,
+   "evidence": [
+    "http_method",
+    "status_code",
+    "uri",
+    "user_agent",
+    "referer"
+   ]
+  }
+ ],
+ "warnings": [
+  {
+   "code": "warn.constant",
+   "field": "http_host",
+   "message": "'http_host' tiene un único valor en todo el archivo."
+  },
+  {
+   "code": "warn.secret_in_values",
+   "field": "http_uri",
+   "message": "'http_uri' contiene credenciales o tokens dentro de sus valores (p. ej. parámetros: authtoken). Trátalos como expuestos."
+  },
+  {
+   "code": "warn.constant",
+   "field": "http_method",
+   "message": "'http_method' tiene un único valor en todo el archivo."
+  },
+  {
+   "code": "warn.pii",
+   "field": "source_ip",
+   "message": "'source_ip' contiene datos personales: ip_address."
+  },
+  {
+   "code": "warn.timezone_unknown",
+   "field": "timestamp",
+   "message": "'timestamp' no indica zona horaria: se asumirá UTC hasta que se verifique."
+  },
+  {
+   "code": "warn.timestamp_rejected_alt",
+   "field": "timestamp",
+   "message": "En 'timestamp' se descartó '%Y-%m-%dT%H:%M / iso8601': solo interpreta el 38.7% de los valores (indicio de orden día/mes distinto al esperado)."
+  }
+ ],
+ "llm_tasks": [
+  "classify_log_type",
+  "confirm_field_mapping",
+  "propose_investigation_queries"
+ ]
+}
