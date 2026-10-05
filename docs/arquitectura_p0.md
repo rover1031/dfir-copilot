@@ -118,15 +118,15 @@ de parámetros pueden ser descriptivos. Ambos son metadatos de esquema, no regis
 * **Nuevo formato de fecha:** añadirlo a `STRPTIME_FORMATS` (y a `DAY_MONTH_PAIRS` si puede confundir día y mes).
 * **Nuevo tipo semántico:** patrón RE2 en `SEMANTIC_PATTERNS`; si es dato personal, añadirlo a `_PII`.
 
-## 9. Pendiente de P0 (bloque B) y siguientes fases
+## 9. Estado de P0 y pendientes
 
-1. **Ingestor multi-formato** usando `readers` y rutas anidadas (`process.parent.name`), y con mapping generado a
-   partir de la propuesta aprobada.
-2. **Espacio por caso** (`data/cases/<caso>/raw|processed|ledger`) para que dos casos no compartan archivos.
-3. **Integridad:** el ledger compara hash de mapping y de Parquet al abrirse; hash de resultado por consulta.
-4. **Roles para detectores** leídos del mapping (actor = usuario o, si no hay, IP).
-5. **Fase LLM:** herramienta del agente que recibe el Data Profile y devuelve clasificación, mapeo y consultas.
-6. **Prompts y reporte bilingües** (P1/P2).
+| Bloque | Contenido | Estado |
+|---|---|---|
+| **P0-A** | Perfilado local multi-formato, mapeo bilingüe, Data Profile | Hecho |
+| **P0-B2** | Espacio por caso, integridad ledger/dataset, huella de resultados, roles de detectores | Hecho (§12) |
+| **P0-B1** | Inspector (Data Profile → borrador de mapping, incl. campos derivados de la URL) e ingestor multi-formato con rutas anidadas | Pendiente |
+| Fase LLM | Herramienta del agente que recibe el Data Profile y devuelve clasificación, mapeo y consultas | Pendiente |
+| P1/P2 | Prompts y reporte bilingües | Pendiente |
 
 ## 10. Lecciones del primer archivo real (exportación de Falcon / LogScale)
 
@@ -141,3 +141,76 @@ regresión con un fixture sintético de la misma estructura; los datos reales no
 
 CSV de 1,02 GB y 4.478.619 filas, 1 núcleo de CPU: **11,1 s** (incluye SHA-256), memoria máxima **0,18 GB**,
 perfil de **6,4 KB**.
+
+## 12. P0-B2 · Espacio por caso, integridad y roles
+
+### 12.1 Estructura de un caso
+
+```
+data/cases/<caso>/
+├── raw/          original (copia de solo lectura verificada por hash, o enlace simbólico si es enorme)
+├── processed/    Parquet canónico + manifiesto + .duckdb_tmp
+├── ledger/       <caso>.jsonl (append-only, cadena de hashes)
+├── mapping.yaml  copia del mapping APROBADO (inmutable: se verifica contra los hashes)
+└── case.json     metadatos: analista, idioma, hashes del dataset
+```
+
+`CaseWorkspace.create / open / list_cases / add_raw / ingest / engine / ledger / verify`. **Un caso = un dataset:**
+al abrirse el ledger el dataset queda sellado (`CaseLocked`); otro archivo u otro mapping exige un caso nuevo.
+
+### 12.2 Los dos agujeros de integridad y cómo se cierran
+
+| Agujero | Antes | Ahora |
+|---|---|---|
+| Re-ingerir el mismo CSV con otro mapping (p. ej. otra zona horaria: 00:04 → 05:04) | `Ledger.open` lo aceptaba en silencio; `replay` solo comparaba el nº de filas | `MappingMismatch` / `ParquetMismatch` al abrir; el replay compara además el **contenido** del resultado |
+| Dos casos con un archivo del mismo nombre en la misma carpeta de salida | El segundo sobrescribía el Parquet del primero | Carpeta propia por caso + `OutputCollision` en el ingestor si el hash de entrada difiere (`overwrite=True` para forzar) |
+
+`Ledger.open` exige ahora que el **mapping** y el **Parquet** coincidan con los registrados en `case_opened`. El Parquet
+se compara con su hash real, no solo con el del manifiesto (un manifiesto copiado no basta). Los ledgers anteriores,
+que no guardaban alguno de los dos hashes, se siguen abriendo.
+
+### 12.3 Huella de resultado en el replay
+
+Cada consulta registra `limit` (tope de filas con que se ejecutó) y `result_sha256`. El replay ejecuta con el mismo
+tope y compara la huella. La huella es **insensible al orden de filas** (sin `ORDER BY`, DuckDB puede devolver las mismas
+filas en otro orden) y redondea flotantes a 9 cifras significativas. Si la consulta estaba truncada, un `LIMIT` sin
+`ORDER BY` puede elegir otras filas: solo se compara el recuento y `hash_match` queda en `None`. Las consultas anteriores
+sin huella también dan `None`, no un falso positivo.
+
+### 12.4 Verificación completa (`CaseWorkspace.verify()`)
+
+Seis comprobaciones, sin lanzar excepciones: cadena del ledger · Parquet = manifiesto · Parquet = ledger · mapping =
+manifiesto · mapping = ledger · original en `raw/` = manifiesto. Cada una sale OK / XX / «--» (no aplicable aún) y se
+puede imprimir en español o inglés.
+
+### 12.5 Roles: actor y recurso
+
+Los detectores ya no suponen `user_id` y `x_invoice_id`. El mapping declara:
+
+```yaml
+roles:
+  actor: user_id
+  resource: x_invoice_id
+```
+
+Prioridad: **override manual > mapping > inferencia**. La inferencia usa los datos: actor = `user_id` si tiene datos, si no
+`src_ip`; recurso = la columna derivada `x_*` con más valores distintos, o `endpoint` si no hay ninguna. Con actor = IP,
+`actor_ip_cluster` se declara no aplicable (agrupar IPs por IP no tiene sentido). La decisión se registra en el ledger
+como entrada `roles`, una sola vez mientras no cambie, porque cambia lo que significa cada hallazgo.
+`describe_dataset` informa de los roles al agente (no cambia el prompt de sistema ni las herramientas, así que no rompe
+la regla del prefijo estable).
+
+### 12.6 Compatibilidad
+
+Se verificó con un manifiesto sin la clave `roles`, un ledger con el `case_opened` del formato anterior y consultas
+sin `limit` ni `result_sha256`: reabre, el replay funciona, los roles se infieren y los detectores dan los mismos
+resultados. Una entrada nueva de tipo `roles` se añade al ledger la primera vez que se ejecutan los detectores (la
+cadena sigue válida, pero el `head_hash` avanza: guarda el anterior como punto de control).
+
+### 12.7 Límites conocidos
+
+* El espacio por caso envuelve el ingestor actual, que solo lee CSV. El ingestor multi-formato (P0-B1) se enchufará
+  en `CaseWorkspace.ingest` sin cambiar la API.
+* `verify()` calcula el SHA-256 del original en `raw/`: con 1 GB son unos segundos.
+* La inferencia de roles es una heurística. Un mapping debe declararlos; la inferencia existe para datasets anteriores.
+* `mapping.yaml` del caso es inmutable por convención y por verificación, no por permisos del sistema de archivos.

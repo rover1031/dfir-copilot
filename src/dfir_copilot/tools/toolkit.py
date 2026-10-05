@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, ValidationError
 
 from dfir_copilot.detectors import available, correlate, run_detectors
+from dfir_copilot.detectors.roles import resolve_roles
 from dfir_copilot.engine.profiler import LogProfiler
 from dfir_copilot.evidence.ledger import candidate_id, finding_id, query_id
 from dfir_copilot.tools.sanitize import clean_text, render, sanitize
@@ -60,6 +61,7 @@ class Toolkit:
     def __init__(self, engine, ledger=None, limits: ToolLimits = ToolLimits()):
         self.engine, self.ledger, self.limits = engine, ledger, limits
         self.profiler = LogProfiler(engine)
+        self._roles = None  # se resuelven la primera vez que hacen falta (no cambian durante el hilo)
         self._tools = {
             "describe_dataset": (NoArgs, self._describe,
                                  "Esquema, volumen, rango temporal, columnas sin datos, zona horaria y detectores disponibles."),
@@ -72,6 +74,12 @@ class Toolkit:
             "build_timeline": (TimelineArgs, self._timeline,
                                "Línea de tiempo de una entidad (usuario, IP...): volumen por periodo, primer y último periodo, pico."),
         }
+
+    @property
+    def roles(self):
+        if self._roles is None:
+            self._roles = resolve_roles(self.engine)
+        return self._roles
 
     def specs(self) -> list[dict]:
         return [{"name": n, "description": d, "schema": m.model_json_schema()} for n, (m, _, d) in self._tools.items()]
@@ -110,6 +118,7 @@ class Toolkit:
             "columns_without_data": empty,
             "overview": dict(zip(ov.columns, ov.rows[0], strict=True)),
             "timezone": m.get("timezone", {}),
+            "roles": self.roles.as_record(),
             "detectors": available(),
         }
 
@@ -140,9 +149,11 @@ class Toolkit:
         unknown = [n for n in (args.names or []) if n not in known]
         if unknown:
             raise ValueError(f"detectores desconocidos: {unknown}. Disponibles: {sorted(known)}")
-        runs = run_detectors(self.engine, names=args.names or None)
-        cases = correlate(runs)
+        roles = self.roles
+        runs = run_detectors(self.engine, names=args.names or None, roles=roles)
+        cases = correlate(runs, key=roles.actor)
         if self.ledger:
+            self.ledger.record_roles(roles)
             self.ledger.record_runs(runs)
             self.ledger.record_cases(cases)
         ds = self.engine.dataset_sha256

@@ -10,6 +10,7 @@ from pathlib import Path
 import duckdb
 import yaml
 
+from dfir_copilot.i18n import t
 from dfir_copilot.schema import CANONICAL_FIELDS
 
 MAPPINGS_DIR = Path(__file__).parent / "mappings"
@@ -17,6 +18,11 @@ _IDENT = re.compile(r"^[a-z_][a-z0-9_]*$")
 _TYPES = {"VARCHAR", "BIGINT", "INTEGER", "SMALLINT", "DOUBLE"}
 _SCHEMA = {f.name: f.dtype for f in CANONICAL_FIELDS}
 _SPECIAL_INPUTS = {"timestamp", "uri"}  # entradas que no son campos canónicos directos
+_ROLES = ("actor", "resource")  # qué columna es quién actúa y sobre qué (ver detectors/roles.py)
+
+
+class OutputCollision(FileExistsError):
+    """La carpeta de salida ya contiene el resultado de otro archivo de entrada."""
 
 
 def _q(name: str) -> str:
@@ -65,6 +71,16 @@ def _validate(m: dict) -> None:
     for canon in fields:
         if canon not in _SCHEMA and canon not in _SPECIAL_INPUTS:
             raise ValueError(f"Campo desconocido en fields: {canon}")
+    roles = m.get("roles")
+    if roles is not None:
+        if not isinstance(roles, dict):
+            raise ValueError(t("ingest.err.bad_roles", detail="debe ser un diccionario {actor: columna, resource: columna}"))
+        outputs = set(_SCHEMA) | set(m.get("derived", {}))
+        for role, col in roles.items():
+            if role not in _ROLES:
+                raise ValueError(t("ingest.err.bad_roles", detail=f"rol desconocido '{role}' (válidos: {_ROLES})"))
+            if col not in outputs:
+                raise ValueError(t("ingest.err.bad_roles", detail=f"'{role}: {col}' no es una columna del resultado"))
     for name, spec in m.get("derived", {}).items():
         if not _IDENT.match(name):
             raise ValueError(f"Nombre derivado inválido: {name}")
@@ -77,8 +93,9 @@ def _validate(m: dict) -> None:
         _check_regex(name, spec["regex"])
 
 
-def load_mapping(source: str) -> dict:
-    path = MAPPINGS_DIR / f"{source}.yaml"
+def load_mapping(source: str, path: str | Path | None = None) -> dict:
+    """Carga un mapping por nombre (carpeta del paquete) o desde una ruta concreta (p. ej. la copia del caso)."""
+    path = Path(path) if path else MAPPINGS_DIR / f"{source}.yaml"
     if not path.exists():
         raise FileNotFoundError(f"No existe el mapping: {path}")
     mapping = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -160,12 +177,18 @@ def ingest_csv(
     source: str,
     out_dir: str | Path = "/workspace/data/processed",
     memory_limit: str = "2GB",
+    mapping_path: str | Path | None = None,
+    overwrite: bool = False,
 ) -> dict:
-    """Normaliza un CSV a Parquet canónico y escribe un manifiesto de custodia."""
+    """Normaliza un CSV a Parquet canónico y escribe un manifiesto de custodia.
+
+    Re-ingerir el MISMO archivo en la misma carpeta es idempotente; ingerir OTRO archivo con el mismo nombre en una
+    carpeta que ya tiene resultado se rechaza (antes sobrescribía el Parquet del primero sin avisar).
+    """
     csv_path = Path(csv_path).resolve()
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    mapping = load_mapping(source)
+    mapping = load_mapping(source, mapping_path)
     parquet_path = out_dir / f"{csv_path.stem}.parquet"
     manifest_path = out_dir / f"{csv_path.stem}.manifest.json"
 
@@ -176,6 +199,10 @@ def ingest_csv(
     con.execute("SET preserve_insertion_order = true")
 
     sha_in = sha256_file(csv_path)
+    if manifest_path.exists() and not overwrite:
+        previous = json.loads(manifest_path.read_text(encoding="utf-8")).get("input", {}).get("sha256")
+        if previous and previous != sha_in:
+            raise OutputCollision(t("ingest.err.collision", out=out_dir, old=previous[:12], new=sha_in[:12]))
     rows_in = con.execute(
         f"SELECT count(*) FROM read_csv({_lit(str(csv_path))}, header = true, all_varchar = true)"
     ).fetchone()[0]
@@ -224,6 +251,7 @@ def ingest_csv(
             "rows": rows_out,
         },
         "mapping": {"path": mapping["_path"], "sha256": mapping["_sha256"]},
+        "roles": mapping.get("roles"),  # qué columnas son actor y recurso para los detectores
         "timezone": {
             "assumed": tz_cfg.get("timezone", "UTC"),
             "verified": bool(tz_cfg.get("timezone_verified", False)),

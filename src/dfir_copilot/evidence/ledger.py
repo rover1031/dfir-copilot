@@ -10,6 +10,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from dfir_copilot.i18n import t
+from dfir_copilot.ingest.ingestor import sha256_file
+
 try:  # bloqueo de archivo: evita que dos kernels abiertos sobre el mismo caso bifurquen la cadena
     import fcntl
 except ImportError:  # pragma: no cover - solo Windows nativo; el proyecto corre en Linux (Docker)
@@ -25,6 +28,14 @@ class DatasetMismatch(Exception):
     """El ledger pertenece a otro dataset (distinto hash de entrada)."""
 
 
+class MappingMismatch(DatasetMismatch):
+    """El mapping con el que se ingirió el dataset no es el que abrió el caso (las columnas derivadas pueden diferir)."""
+
+
+class ParquetMismatch(DatasetMismatch):
+    """El Parquet no es el que abrió el caso: se re-ingirió o se alteró."""
+
+
 class LedgerCorrupt(Exception):
     """La cadena de hashes del ledger no es válida."""
 
@@ -35,6 +46,26 @@ class VerifyResult:
     entries: int
     head_hash: str
     error: str = ""
+
+
+def verify_file(path: str | Path) -> VerifyResult:
+    """Recalcula la cadena de hashes de un archivo de ledger sin abrirlo como `Ledger` (no lanza si está corrupto)."""
+    prev, n = GENESIS, 0
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line_no, line in enumerate(fh, start=1):
+                entry = json.loads(line)
+                claimed = entry.pop("hash", None)
+                if entry.get("seq") != n + 1:
+                    return VerifyResult(False, n, prev, f"línea {line_no}: seq {entry.get('seq')} (esperado {n + 1})")
+                if entry.get("prev_hash") != prev:
+                    return VerifyResult(False, n, prev, f"línea {line_no}: prev_hash no enlaza con la entrada anterior")
+                if _sha(_canon(entry)) != claimed:
+                    return VerifyResult(False, n, prev, f"línea {line_no}: el hash no coincide con el contenido")
+                prev, n = claimed, n + 1
+    except (OSError, json.JSONDecodeError) as exc:
+        return VerifyResult(False, n, prev, f"no se pudo leer el ledger: {exc}")
+    return VerifyResult(True, n, prev)
 
 
 def _canon(obj) -> str:
@@ -123,6 +154,7 @@ class Ledger:
             recorded = ledger._entries[0]["data"]["dataset"]["input_sha256"]
             if recorded != engine.dataset_sha256:
                 raise DatasetMismatch(f"El caso {case_id} se abrió con otro dataset ({recorded[:12]}…)")
+            ledger._assert_bound(engine, case_id)
         else:
             m = engine.manifest
             ledger.append("case_opened", {
@@ -141,6 +173,23 @@ class Ledger:
                 "ingest_warnings": m.get("warnings", []),
             })
         return ledger
+
+    def _assert_bound(self, engine, case_id: str) -> None:
+        """El mismo CSV puede dar otro Parquet si cambia el mapping (p. ej. la zona horaria: 00:04 pasa a 05:04).
+
+        Por eso no basta con comparar el hash de entrada: se exige que el mapping y el Parquet sean los que abrieron
+        el caso. Los ledgers anteriores a esta comprobación no guardaban alguno de los dos y se aceptan como antes.
+        """
+        recorded = self._entries[0]["data"]["dataset"]
+        manifest = engine.manifest or {}
+        mapping_now = manifest.get("mapping", {}).get("sha256")
+        if recorded.get("mapping_sha256") and mapping_now and recorded["mapping_sha256"] != mapping_now:
+            raise MappingMismatch(t("integrity.err.mapping", case_id=case_id,
+                                    recorded=recorded["mapping_sha256"][:12], current=mapping_now[:12]))
+        parquet_now = getattr(engine, "parquet_sha256", None) or sha256_file(engine.parquet)
+        if recorded.get("parquet_sha256") and recorded["parquet_sha256"] != parquet_now:
+            raise ParquetMismatch(t("integrity.err.parquet", case_id=case_id,
+                                    recorded=recorded["parquet_sha256"][:12], current=parquet_now[:12]))
 
     # --- escritura ------------------------------------------------------------------------
     def append(self, type_: str, data: dict) -> dict:
@@ -209,6 +258,19 @@ class Ledger:
             counts["runs"] += 1
         return counts
 
+    def record_roles(self, roles) -> bool:
+        """Registra qué columnas se trataron como actor y recurso (cambian lo que significan los hallazgos).
+
+        Solo escribe si difieren de la última decisión registrada: ejecutar detectores diez veces deja una entrada.
+        """
+        self._sync()
+        data = roles.as_record()
+        last = next((e for e in reversed(self._entries) if e["type"] == "roles"), None)
+        if last and last["data"] == data:
+            return False
+        self.append("roles", data)
+        return True
+
     def record_cases(self, cases) -> int:
         """Registra los casos candidatos de `correlate()`. Exige que sus hallazgos ya estén en el ledger."""
         self._sync()
@@ -264,22 +326,7 @@ class Ledger:
 
     def verify(self) -> VerifyResult:
         """Relee el archivo desde disco y recalcula toda la cadena."""
-        prev, n = GENESIS, 0
-        try:
-            with open(self.path, encoding="utf-8") as fh:
-                for line_no, line in enumerate(fh, start=1):
-                    entry = json.loads(line)
-                    claimed = entry.pop("hash", None)
-                    if entry.get("seq") != n + 1:
-                        return VerifyResult(False, n, prev, f"línea {line_no}: seq {entry.get('seq')} (esperado {n + 1})")
-                    if entry.get("prev_hash") != prev:
-                        return VerifyResult(False, n, prev, f"línea {line_no}: prev_hash no enlaza con la entrada anterior")
-                    if _sha(_canon(entry)) != claimed:
-                        return VerifyResult(False, n, prev, f"línea {line_no}: el hash no coincide con el contenido")
-                    prev, n = claimed, n + 1
-        except (OSError, json.JSONDecodeError) as exc:
-            return VerifyResult(False, n, prev, f"no se pudo leer el ledger: {exc}")
-        return VerifyResult(True, n, prev)
+        return verify_file(self.path)
 
     def replay(self, engine, record: bool = True) -> list[dict]:
         """Re-ejecuta las consultas registradas y compara el número de filas devueltas.
@@ -296,14 +343,21 @@ class Ledger:
             if d["status"] != "ok":
                 continue
             try:
-                rows = engine.query(d["sql"]).row_count
-                results.append({"query_id": d["query_id"], "recorded_rows": d["rows"],
-                                "replayed_rows": rows, "match": rows == d["rows"]})
+                res = engine.query(d["sql"], max_rows=d.get("limit"))  # mismo tope que en la ejecución original
+                rows = res.row_count
+                recorded_hash = d.get("result_sha256")
+                # Con truncamiento, un LIMIT sin ORDER BY puede elegir otras filas: solo se compara el recuento.
+                comparable = recorded_hash is not None and not d.get("truncated") and not res.truncated
+                hash_match = (engine.history[-1]["result_sha256"] == recorded_hash) if comparable else None
+                results.append({"query_id": d["query_id"], "recorded_rows": d["rows"], "replayed_rows": rows,
+                                "hash_match": hash_match, "match": rows == d["rows"] and hash_match is not False})
             except Exception as exc:  # noqa: BLE001 - se reporta, no se oculta
-                results.append({"query_id": d["query_id"], "recorded_rows": d["rows"],
-                                "replayed_rows": None, "match": False, "error": f"{type(exc).__name__}: {exc}"})
+                results.append({"query_id": d["query_id"], "recorded_rows": d["rows"], "replayed_rows": None,
+                                "hash_match": None, "match": False, "error": f"{type(exc).__name__}: {exc}"})
         del engine.history[mark:]
         if record:
             self.append("replay", {"queries": len(results), "matches": sum(r["match"] for r in results),
-                                   "mismatches": [r["query_id"] for r in results if not r["match"]]})
+                                   "mismatches": [r["query_id"] for r in results if not r["match"]],
+                                   "hash_checked": sum(r["hash_match"] is not None for r in results),
+                                   "hash_mismatches": [r["query_id"] for r in results if r["hash_match"] is False]})
         return results

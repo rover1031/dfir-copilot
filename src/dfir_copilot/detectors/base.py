@@ -76,10 +76,20 @@ def available() -> dict[str, str]:
 
 
 def run_detectors(
-    engine: QueryEngine, names: list[str] | None = None, params: dict | None = None
+    engine: QueryEngine, names: list[str] | None = None, params: dict | None = None, roles=None
 ) -> list[DetectorRun]:
-    """Ejecuta detectores aislados entre sí y adjunta a cada hallazgo las consultas que lo respaldan."""
+    """Ejecuta detectores aislados entre sí y adjunta a cada hallazgo las consultas que lo respaldan.
+
+    `roles` (ver `detectors.roles`) fija qué columnas son actor y recurso; los `params` explícitos tienen prioridad.
+    Sin `roles` se conservan los valores por defecto de cada detector (`user_id`, `x_invoice_id`).
+    """
+    from dfir_copilot.detectors.roles import detector_params
+
     params = params or {}
+    if roles is not None:
+        role_params = detector_params(roles)
+        params = {name: {**role_params.get(name, {}), **params.get(name, {})}
+                  for name in {*role_params, *params}}
     runs = []
     for name, cls in _REGISTRY.items():
         if names and name not in names:

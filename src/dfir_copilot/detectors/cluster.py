@@ -1,7 +1,13 @@
 """Grupos actor-IP: identidades que operan desde pocas IPs con un volumen por IP muy superior al de sus pares."""
 from __future__ import annotations
 
-from dfir_copilot.detectors.base import Detector, Finding, NotApplicable, ensure_columns, register
+from dfir_copilot.detectors.base import (
+    Detector,
+    Finding,
+    NotApplicable,
+    ensure_columns,
+    register,
+)
 
 
 def _q(name: str) -> str:
@@ -43,6 +49,8 @@ class ActorIpCluster(Detector):
 
     def run(self, engine) -> list[Finding]:
         a = _q(self.actor_col)
+        if self.actor_col == "src_ip":
+            raise NotApplicable("el actor es la propia IP: no hay identidades que agrupar por IP")
         ensure_columns(engine, [self.actor_col, "src_ip"])
         pairs = (
             f"pairs AS (SELECT {a} AS actor, src_ip, count(*) AS n FROM logs "
@@ -75,7 +83,9 @@ class ActorIpCluster(Detector):
         if not rows.rows:
             return []
         externos = {ip: ext for _, ip, _, ext in rows.rows}
-        volume = {(actor, ip): cnt for actor, ip, cnt, _ in rows.rows}
+        volume = {}
+        for actor, ip, cnt, _ in rows.rows:
+            volume[(actor, ip)] = cnt
 
         findings = []
         for i, comp in enumerate(_components([(r[0], r[1]) for r in rows.rows]), start=1):

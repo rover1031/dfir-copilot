@@ -1,6 +1,7 @@
 """Motor de consultas forenses: solo lectura, una sentencia SELECT, con límites."""
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 import time
@@ -23,6 +24,22 @@ class QueryTimeout(TimeoutError):
 
 def _lit(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
+
+
+def result_digest(columns, rows) -> str:
+    """Huella del RESULTADO de una consulta, insensible al orden de las filas.
+
+    Sin ORDER BY, DuckDB puede devolver las mismas filas en otro orden entre ejecuciones; por eso se ordenan las filas
+    serializadas antes de hacer el hash. Los flotantes se redondean a 9 cifras significativas: sumar en paralelo puede
+    cambiar los últimos dígitos sin que el resultado haya cambiado de verdad.
+    """
+    def norm(v):
+        return format(v, ".9g") if isinstance(v, float) else v
+
+    lines = sorted(json.dumps([norm(v) for v in r], ensure_ascii=False, default=str, separators=(",", ":"))
+                   for r in rows)
+    payload = "\x1f".join(columns) + "\n" + "\n".join(lines)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -63,10 +80,13 @@ class QueryEngine:
         self.manifest = (
             json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else None
         )
+        self.verified = bool(verify)
+        self.parquet_sha256: str | None = None  # hash real del Parquet; solo se calcula si se verifica
         if verify:
             if self.manifest is None:
                 raise ValueError(f"Falta el manifiesto para verificar: {manifest_path}")
-            if sha256_file(self.parquet) != self.manifest["output"]["sha256"]:
+            self.parquet_sha256 = sha256_file(self.parquet)
+            if self.parquet_sha256 != self.manifest["output"]["sha256"]:
                 raise ValueError("El hash del Parquet no coincide con el manifiesto: dataset alterado")
         self.dataset_sha256 = self.manifest["input"]["sha256"] if self.manifest else "no-verificado"
         self.max_rows = max_rows
@@ -106,7 +126,8 @@ class QueryEngine:
             raise QueryRejected(f"Solo se permite SELECT; recibido: {stmts[0].type.name}")
         return text
 
-    def _record(self, sql, status, started, t0, rows=0, truncated=False, error=None):
+    def _record(self, sql, status, started, t0, rows=0, truncated=False, error=None, limit=None,
+                result_sha256=None):
         self.history.append(
             {
                 "executed_at_utc": started,
@@ -117,6 +138,8 @@ class QueryEngine:
                 "elapsed_ms": int((time.perf_counter() - t0) * 1000),
                 "error": error,
                 "dataset_sha256": self.dataset_sha256,
+                "limit": limit,  # tope de filas con el que se ejecutó: el replay debe usar el mismo
+                "result_sha256": result_sha256,  # huella del resultado (None si hubo error)
             }
         )
 
@@ -165,7 +188,8 @@ class QueryEngine:
             raise
         truncated = len(fetched) > limit
         rows = fetched[:limit]
-        self._record(sql, "ok", started, t0, rows=len(rows), truncated=truncated)
+        self._record(sql, "ok", started, t0, rows=len(rows), truncated=truncated, limit=limit,
+                     result_sha256=result_digest(columns, rows))
         return QueryResult(
             sql=text,
             columns=columns,
