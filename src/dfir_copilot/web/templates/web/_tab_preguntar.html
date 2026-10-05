@@ -1,0 +1,13 @@
+<div class="card">
+<p class="hint">Presupuesto: {{ budget.case_used }} tokens gastados en el caso · tope por pregunta {{ budget.per_question }}{% if budget.case_limit %} · tope del caso {{ budget.case_limit }}{% endif %}.
+Lo que escribas se traduce a alias antes de llegar al modelo y verás exactamente lo enviado.</p>
+{% if pending %}<div class="msg info">Hay {{ pending }} hipótesis esperando tu decisión: revísalas en la pestaña Hipótesis antes de seguir.</div>{% endif %}
+<form hx-post="{{ base }}preguntar/" hx-target="#job-area" hx-swap="innerHTML">{% csrf_token %}<input type="hidden" name="reveal" value="{% if reveal %}1{% else %}0{% endif %}">
+<label>Pregunta en lenguaje natural</label><textarea name="question" required placeholder="¿Hay cuentas con actividad anómala? ¿Qué hizo U-0032 en diciembre?"></textarea>
+<label>Cifras que NO son identificadores <small>(opcional, separadas por comas: se envían tal cual)</small></label><input type="text" name="literal">
+<p class="row"><button type="submit" {% if not model_ok %}disabled{% endif %}>Preguntar</button><span class="spin">enviando…</span>
+{% if not model_ok %}<small class="muted">No hay un modelo configurado: define la clave de API en el .env y reinicia la interfaz.</small>{% endif %}</p></form></div>
+<div class="card"><h3>Conversación</h3>
+{% for t in turns %}<div style="padding:8px 0;border-bottom:1px solid var(--line)"><small class="muted">{{ t.ts }} · {{ t.tokens }} tokens{% if t.cut_by %} · cortada por {{ t.cut_by }}{% endif %} · {{ t.status }}</small>
+{% if t.question %}<p><strong>Tú:</strong> {{ t.question }}</p>{% endif %}{% if t.answer %}<div class="answer">{{ t.answer }}</div>{% endif %}</div>
+{% empty %}<p class="muted">Todavía no hay conversación en este caso.</p>{% endfor %}</div>

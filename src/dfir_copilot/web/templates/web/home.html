@@ -1,0 +1,28 @@
+{% extends "web/base.html" %}{% block content %}
+<h1>Proyectos</h1>
+{% if not llm_ok %}<div class="msg info">Modelo no configurado ({{ llm_msg }}). El análisis local (perfil, mapeo, ingesta, detectores) funciona igual; las etapas con modelo se saltan.</div>{% endif %}
+{% if error %}<div class="msg error">{{ error }}</div>{% endif %}
+<div class="grid">
+{% for p in projects %}<div class="card"><a href="/proyectos/{{ p.id }}/"><strong>{{ p.name }}</strong></a><br>
+<span class="muted">{{ p.files }} archivo(s)</span><br>{% for state, n in p.states.items %}<span class="chip chip-{{ state }}">{{ state }} · {{ n }}</span>{% endfor %}</div>
+{% empty %}<div class="card muted">Aún no hay proyectos. Crea el primero abajo.</div>{% endfor %}
+</div>
+<h2>Nuevo proyecto</h2>
+<form class="card" method="post" action="/proyectos/nuevo/">{% csrf_token %}
+<p class="hint">Un proyecto es una carpeta con los archivos a analizar. Al crearlo arranca solo el análisis de cada archivo (un caso por archivo); cuando preguntes, ya habrá avance.</p>
+<div class="grid">
+<div><label>Nombre</label><input type="text" name="name" value="{{ form.name }}" placeholder="Análisis 1" required></div>
+<div><label>Carpeta con los archivos</label><input type="text" name="source_dir" value="{{ form.source_dir }}" placeholder="{{ data_root }}/inbox/analisis-1" required>
+<small>Debe estar dentro de {{ data_root }}.</small></div>
+<div><label>Idioma del informe</label><select name="language"><option value="es" {% if form.language == "es" %}selected{% endif %}>Español</option><option value="en" {% if form.language == "en" %}selected{% endif %}>English</option></select></div>
+<div><label>Zona horaria de las horas del archivo</label><input type="text" name="timezone" value="{{ form.timezone }}" placeholder="America/Bogota (opcional)">
+<small>Si la dejas vacía se asume UTC y se marca como no verificada. Nombre IANA exacto.</small></div>
+<div><label>Analista</label><input type="text" name="analyst" value="{{ form.analyst }}" placeholder="tu nombre"></div>
+<div><label>Tope de tokens por pregunta</label><input type="number" name="max_tokens" value="{{ form.max_tokens }}" min="1000"></div>
+</div>
+<label class="inline"><input type="checkbox" name="use_llm" {% if form.use_llm %}checked{% endif %}> Usar el modelo en el análisis automático (interpretación del perfil y triaje del agente; gasta API)</label>
+<p><button class="big" type="submit">Crear proyecto y analizar</button></p>
+</form>
+{% if legacy %}<h2>Casos existentes</h2><div class="card"><table><tr><th>Caso</th><th>Analista</th><th>Creado</th><th>Datos</th></tr>
+{% for c in legacy %}<tr><td><a href="/casos/{{ c.case_id }}/">{{ c.case_id }}</a></td><td>{{ c.analyst|default:"—" }}</td><td>{{ c.created_at_utc|default:"—" }}</td><td>{% if c.ingested %}ingeridos{% else %}—{% endif %}</td></tr>{% endfor %}</table></div>{% endif %}
+{% endblock %}

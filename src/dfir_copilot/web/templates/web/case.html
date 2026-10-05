@@ -1,0 +1,12 @@
+{% extends "web/base.html" %}{% block title %}{{ case_id }}{% endblock %}{% block content %}
+<p>{% if pid %}<a href="/proyectos/{{ pid }}/">← Proyecto</a>{% else %}<a href="/">← Proyectos</a>{% endif %}</p>
+<div class="row"><h1>{{ case_id }}</h1>
+<span class="right row">
+<a class="btn secondary" href="?reveal={% if reveal %}0{% else %}1{% endif %}" title="Traduce los alias a valores reales solo en pantalla">{% if reveal %}Ocultar valores reales{% else %}Mostrar valores reales{% endif %}</a>
+<a class="btn big" hx-get="{{ base }}tab/informe/?reveal={% if reveal %}1{% else %}0{% endif %}" hx-target="#tab" hx-swap="innerHTML" role="button">Exportar informe</a>
+</span></div>
+{% if reveal %}<div class="msg info">Mostrando valores reales. Solo en esta pantalla: lo que ve el modelo sigue siendo la copia con alias.</div>{% endif %}
+<nav class="tabs" id="tabs">{% for t in tabs %}<a hx-get="{{ base }}tab/{{ t }}/?reveal={% if reveal %}1{% else %}0{% endif %}" hx-target="#tab" hx-swap="innerHTML" {% if forloop.first %}class="on"{% endif %} onclick="document.querySelectorAll('#tabs a').forEach(a=>a.classList.remove('on'));this.classList.add('on')">{{ t|capfirst }}</a>{% endfor %}</nav>
+<div id="tab" hx-get="{{ base }}tab/resumen/?reveal={% if reveal %}1{% else %}0{% endif %}" hx-trigger="load" hx-swap="innerHTML"><span class="muted">Cargando…</span></div>
+<div id="job-area"></div>
+{% endblock %}

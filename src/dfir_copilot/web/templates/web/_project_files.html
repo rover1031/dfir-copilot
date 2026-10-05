@@ -1,0 +1,12 @@
+<div id="files" {% if running %}hx-get="/proyectos/{{ project.id }}/estado/" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+<div class="card"><table><tr><th>Archivo</th><th>Análisis</th><th></th></tr>
+{% for r in rows %}<tr>
+<td><strong>{{ r.file.name }}</strong><br><small>{{ r.file.size|filesizeformat }}</small></td>
+<td>{% if not r.file.supported %}<span class="chip chip-skipped">{{ r.file.reason }}</span>
+{% elif r.status %}{% for name, s in r.steps %}<span class="chip chip-{{ s.status }}" title="{{ s.message }}">{{ name }}</span>{% endfor %}
+<br><small class="muted">{% if r.running %}en curso…{% elif r.interrupted %}interrumpido (se reinició el servidor): pulsa Reanalizar{% else %}{{ r.status.state }}{% endif %}</small>
+{% for name, s in r.steps %}{% if s.message and s.status != "pending" %}<br><small class="muted">{{ name }}: {{ s.message }}</small>{% endif %}{% endfor %}
+{% else %}<span class="chip chip-pending">pendiente</span>{% endif %}</td>
+<td style="white-space:nowrap">{% if r.has_case %}<a class="btn" href="/proyectos/{{ project.id }}/casos/{{ r.file.case_id }}/">Abrir caso</a>{% endif %}
+{% if r.file.supported %}<form style="display:inline" hx-post="/proyectos/{{ project.id }}/analizar/{{ r.file.case_id }}/" hx-target="#files" hx-swap="outerHTML">{% csrf_token %}<button class="secondary" type="submit" {% if r.running %}disabled{% endif %}>Reanalizar</button></form>{% endif %}</td>
+</tr>{% empty %}<tr><td colspan="3" class="muted">La carpeta no tiene archivos.</td></tr>{% endfor %}</table></div></div>

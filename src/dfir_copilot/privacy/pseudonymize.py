@@ -400,3 +400,19 @@ class Pseudonymizer:
         out.append(text[pos:])
         subs = tuple({"column": c, "alias": a, "count": n} for (c, a), n in sorted(counts.items()))
         return TextResult("".join(out), subs, used)
+
+    def find_real(self, text: str) -> list[dict]:
+        """Valores reales conocidos que aparecen en `text`, SIN devolverlos: [{"column", "alias"}].
+
+        Para comprobar que un texto que va a salir de la máquina (p. ej. el informe compartible) no los lleva. Solo mira los valores
+        no ambiguos: un número suelto no se puede distinguir de una cifra corriente (ver `alias_text`)."""
+        text = str(text)
+        word = "A-Za-z0-9_"
+        found = {}
+        for col, mapping in self._to_alias.items():
+            for real, alias in mapping.items():
+                if not real or len(real) < self._MIN_SAFE_LEN or real.isdigit() or real not in text:
+                    continue
+                if re.search(rf"(?<![{word}]){re.escape(real)}(?![{word}])", text):
+                    found[(col, alias)] = {"column": col, "alias": alias}
+        return list(found.values())

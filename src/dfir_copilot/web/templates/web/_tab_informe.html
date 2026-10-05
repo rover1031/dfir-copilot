@@ -1,0 +1,13 @@
+{% if flash %}<div class="msg {{ flash.0 }}">{{ flash.1 }}</div>{% endif %}
+<div class="card"><h3>Exportar informe</h3>
+<p class="hint">Generado desde el ledger: lo calcula el código, sale el mismo documento con el mismo ledger y queda registrado con su hash. Exportar es decisión tuya.</p>
+<form hx-post="{{ base }}informe/exportar/" hx-target="#job-area" hx-swap="innerHTML">{% csrf_token %}<input type="hidden" name="reveal" value="{% if reveal %}1{% else %}0{% endif %}">
+<div class="grid"><div><label>Variante</label><select name="variant"><option value="compartible">Compartible (alias, sin diccionario; comprobado por código)</option><option value="interno">Interna (valores reales + diccionario de alias)</option></select></div>
+<div><label>Idioma</label><select name="lang"><option value="es" {% if lang == "es" %}selected{% endif %}>Español</option><option value="en" {% if lang == "en" %}selected{% endif %}>English</option></select></div></div>
+<label>Recomendaciones y próximos pasos <small>(las redactas tú; si escribes valores reales se traducen a alias)</small></label><textarea name="recommendations"></textarea>
+<label class="inline"><input type="checkbox" name="replay" checked> Verificar las consultas con el replay antes de exportar (queda registrado en el ledger)</label>
+<p><button class="big" type="submit">Exportar informe</button></p></form></div>
+<div class="card"><h3>Exportaciones anteriores</h3>
+{% for e in exports %}<div style="padding:6px 0;border-bottom:1px solid var(--line)"><small class="muted">{{ e.ts }} · {{ e.analyst|default:"—" }}</small><br>
+<span class="chip">{{ e.variant }}</span><span class="chip">{{ e.lang }}</span>{% if e.exists %}<a href="{{ base }}informe/descargar/{{ e.file }}/">{{ e.file }}</a>{% elif e.current %}<span class="muted">{{ e.file }} (el archivo ya no está en disco)</span>{% else %}<span class="muted">{{ e.file }} · reemplazado por una exportación posterior</span>{% endif %}
+<br><small>SHA-256 <code>{{ e.sha256 }}</code></small></div>{% empty %}<p class="muted">Aún no se ha exportado ningún informe de este caso.</p>{% endfor %}</div>

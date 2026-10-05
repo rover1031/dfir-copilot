@@ -1,0 +1,6 @@
+<div class="card"><h3>Cadena de custodia {% if ok %}<span class="chip chip-done">verificada</span>{% else %}<span class="chip chip-failed">FALLA</span>{% endif %}</h3>
+<table>{% for c in checks %}<tr><td>{{ c.text }}</td></tr>{% endfor %}</table></div>
+<div class="card"><h3>Ledger</h3><p>Entradas: {{ summary.entries }}<br>Último hash: <code>{{ summary.head_hash }}</code></p>
+<table><tr><th>Tipo</th><th>Entradas</th></tr>{% for k, n in summary.counts.items %}<tr><td>{{ k }}</td><td>{{ n }}</td></tr>{% endfor %}</table></div>
+<div class="card"><h3>Copias de datos que vio el modelo</h3>{% for cid, c in copies.items %}<p><code>{{ cid }}</code> · política {{ c.policy.version }} · diccionario (solo hash) <code>{{ c.aliases_sha256 }}</code></p>{% empty %}<p class="muted">El modelo no ha consultado ninguna copia.</p>{% endfor %}</div>
+<div class="card"><h3>Presupuesto de tokens</h3><p>Gastados en el caso: {{ budget.case_used }} · tope por pregunta: {{ budget.per_question }}{% if budget.case_limit %} · tope del caso: {{ budget.case_limit }}{% endif %}</p></div>

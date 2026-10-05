@@ -1,0 +1,22 @@
+{% if pipeline %}<div class="card"><strong>Análisis automático</strong> <span class="muted">· {{ pipeline.state }}</span><br>
+{% for name, s in pipeline.steps.items %}<span class="chip chip-{{ s.status }}" title="{{ s.message }}">{{ name }}</span>{% endfor %}</div>{% endif %}
+<div class="grid">
+<div class="card"><h3>Datos</h3><table>
+<tr><td>Filas</td><td>{{ ds.input_rows }}</td></tr><tr><td>Rango (UTC)</td><td>{{ ds.time_range_utc.0 }} → {{ ds.time_range_utc.1 }}</td></tr>
+<tr><td>Zona horaria</td><td><code>{{ tz.assumed }}</code> — {% if tz.verified %}verificada{% else %}<strong>sin verificar</strong>{% endif %}</td></tr>
+<tr><td>Actor / recurso</td><td><code>{{ roles.actor }}</code> / <code>{{ roles.resource }}</code></td></tr></table></div>
+{% if interp and interp.ok %}<div class="card"><h3>Interpretación del perfil (modelo)</h3>
+<p>Tipo de log: <strong>{{ interp.interpretation.classification.log_type }}</strong> · confianza {{ interp.interpretation.classification.confidence|floatformat:2 }}<br>
+<small>{{ interp.interpretation.classification.rationale }}</small></p>
+<p class="hint">El modelo solo vio metadatos del perfil, nunca filas. Propuso {{ interp.interpretation.proposed_queries|length }} consulta(s) y {{ interp.interpretation.analyst_questions|length }} pregunta(s) para ti.</p></div>
+{% elif interp %}<div class="card"><h3>Interpretación del perfil</h3><p class="msg error">La respuesta del modelo no se pudo usar: {{ interp.error }}</p></div>{% endif %}
+</div>
+<div class="card"><h3>Hallazgos de los detectores ({{ n_findings }}) <small class="muted">calculados por código sobre la copia seudonimizada</small></h3>
+<table><tr><th>Severidad</th><th>Detector</th><th>Entidad</th><th>Resumen</th></tr>
+{% for f in findings %}<tr><td>{{ f.severity }}</td><td>{{ f.detector }}</td><td>{{ f.entity }}</td><td>{{ f.summary }}<br><small class="muted"><code>{{ f.finding_id }}</code></small></td></tr>
+{% empty %}<tr><td colspan="4" class="muted">Los detectores todavía no se han ejecutado.</td></tr>{% endfor %}</table></div>
+{% if cands %}<div class="card"><h3>Casos candidatos (señales de varios detectores sobre la misma entidad)</h3><table><tr><th>Entidad</th><th>Señales</th><th>Severidad</th></tr>
+{% for c in cands %}<tr><td>{{ c.entity }}</td><td>{{ c.signals }}</td><td>{{ c.severity }}</td></tr>{% endfor %}</table></div>{% endif %}
+{% if explored %}<div class="card"><h3>Consultas propuestas por el modelo, ejecutadas en local</h3><table><tr><th>Consulta</th><th>Estado</th><th>Filas</th></tr>
+{% for q in explored %}<tr><td>{{ q.id }} <small class="muted">{{ q.priority }}</small></td><td>{{ q.status }}{% if q.error %} <small>{{ q.error }}</small>{% endif %}</td><td>{{ q.row_count }}</td></tr>{% endfor %}</table>
+<p class="hint">Es exploración, no evidencia: los resultados con valores reales no vuelven al modelo.</p></div>{% endif %}

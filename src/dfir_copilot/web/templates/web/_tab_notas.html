@@ -1,0 +1,8 @@
+{% if flash %}<div class="msg {{ flash.0 }}">{{ flash.1 }}</div>{% endif %}
+<div class="card"><h3>Nueva nota</h3><p class="hint">El agente verá tus últimas 10 notas al inicio de cada pregunta, como contexto que tú fijaste (no como evidencia). Se traducen a alias.</p>
+<form hx-post="{{ base }}notas/" hx-target="#tab" hx-swap="innerHTML">{% csrf_token %}<input type="hidden" name="reveal" value="{% if reveal %}1{% else %}0{% endif %}">
+<label>Nota</label><textarea name="text" required></textarea>
+<label>Tu valoración</label><select name="status"><option value="">sin valoración</option><option value="confirmed">confirmado</option><option value="refuted">refutado</option><option value="inconclusive">no concluyente</option></select>
+<p><button type="submit">Guardar nota</button></p></form></div>
+<div class="card"><h3>Notas ({{ notes|length }})</h3>{% for n in notes %}<div style="padding:6px 0;border-bottom:1px solid var(--line)"><small class="muted">{{ n.ts }} · {{ n.analyst|default:"—" }} · {{ n.status|default:"sin valoración" }}{% if not n.shown %} · <strong>no visible para el modelo</strong> (escrita fuera del agente){% endif %}</small><br>{{ n.text }}</div>
+{% empty %}<p class="muted">Sin notas.</p>{% endfor %}</div>

@@ -1,0 +1,11 @@
+{% if job.state == "running" %}
+<div class="card" hx-get="{{ base }}job/{{ job.id }}/?reveal={% if reveal %}1{% else %}0{% endif %}" hx-trigger="every 1500ms" hx-swap="outerHTML">⏳ El agente está trabajando… puede tardar un par de minutos. No cierres esta página.</div>
+{% elif job.state == "error" %}
+<div class="msg error">{{ job.error }}</div>
+{% else %}
+<div class="card"><strong>{% if result.status == "needs_approval" %}Hay hipótesis esperando tu aprobación{% else %}Respuesta del agente{% endif %}</strong>
+<span class="muted"> · {{ result.tokens }} tokens · {{ result.steps }} pasos{% if result.cut_by %} · cortada por {{ result.cut_by }}{% endif %}</span>
+{% if result.sent %}<p class="hint">Lo que recibió el modelo (en alias): <em>{{ result.sent }}</em>{% for s in result.substitutions %} <span class="chip">{{ s.alias }} ×{{ s.count }}</span>{% endfor %}</p>{% endif %}
+{% if result.answer %}<div class="answer">{{ result.answer }}</div>{% else %}<p class="muted">El agente se detuvo a esperar tu decisión: revisa la pestaña Hipótesis.</p>{% endif %}</div>
+<div hx-get="{{ base }}tab/{% if job.kind == 'decide' %}hipotesis{% else %}preguntar{% endif %}/?reveal={% if reveal %}1{% else %}0{% endif %}" hx-target="#tab" hx-trigger="load" hx-swap="innerHTML"></div>
+{% endif %}

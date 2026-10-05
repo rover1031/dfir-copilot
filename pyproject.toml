@@ -21,10 +21,17 @@ notebook = ["jupyterlab>=4", "matplotlib", "plotly"]
 dev = ["pytest", "ruff"]
 pdf = ["pymupdf"]
 agent = ["langgraph>=1.0", "langchain-core>=1.0", "langchain-anthropic>=1.0"]
+web = ["django>=5.0,<6"]
 openai = ["langchain-openai>=1.0"]
+
+[project.scripts]
+dfir-web = "dfir_copilot.web.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+dfir_copilot = ["web/templates/web/*.html", "web/static/web/*", "ingest/mappings/*.yaml", "profiling/aliases.yaml"]
 
 [tool.ruff]
 line-length = 120

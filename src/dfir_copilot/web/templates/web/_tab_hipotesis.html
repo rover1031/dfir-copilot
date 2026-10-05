@@ -1,0 +1,22 @@
+{% if flash %}<div class="msg {{ flash.0 }}">{{ flash.1 }}</div>{% endif %}
+{% for r in pending %}
+<div class="card" style="border-color:#fedf89"><h3>⏳ Esperando tu decisión · <code>{{ r.hypothesis_id }}</code> <span class="badge">{{ r.estado_actual }} → {{ r.estado_solicitado }}</span></h3>
+<p><strong>Hipótesis:</strong> {{ r.hipotesis }}</p>
+<p><strong>Criterio de refutación (fijado al proponerla):</strong> {{ r.criterio_de_refutacion }}</p>
+<p><strong>Justificación del agente:</strong> {{ r.justificacion }}</p>
+{% if r.intentos_de_refutacion %}<h3>Intentos de refutación</h3>{% for a in r.intentos_de_refutacion %}
+<div class="card"><code>{{ a.ref }}</code><pre>{{ a.detalle }}</pre><small><strong>La habría refutado si:</strong> {{ a.habria_refutado_si }}<br><strong>Observado:</strong> {{ a.observado }}</small></div>{% endfor %}
+<p class="hint">Pregúntate: ¿esa consulta <em>podía</em> haber salido distinto? Si solo repite lo que ya apoyaba la hipótesis, rechaza y dilo en la nota.</p>{% endif %}
+{% if r.evidencia %}<details><summary>Evidencia citada ({{ r.evidencia|length }})</summary>{% for e in r.evidencia %}<p><code>{{ e.ref }}</code> {{ e.tipo }}: <small>{{ e.detalle }}</small></p>{% endfor %}</details>{% endif %}
+<form hx-post="{{ base }}decidir/" hx-target="#job-area" hx-swap="innerHTML">{% csrf_token %}<input type="hidden" name="reveal" value="{% if reveal %}1{% else %}0{% endif %}">
+<label>Tu nota <small>(queda en el ledger y la verá el modelo; los valores reales se traducen a alias solos)</small></label><textarea name="note" required></textarea>
+<p class="row"><button name="decision" value="approve" {% if not model_ok %}disabled{% endif %}>Aprobar</button><button class="danger" name="decision" value="reject" {% if not model_ok %}disabled{% endif %}>Rechazar</button>
+{% if not model_ok %}<small class="muted">Reanudar al agente necesita el modelo: configura la clave de API.</small>{% endif %}</p></form></div>
+{% endfor %}
+<div class="card"><h3>Hipótesis del caso ({{ items|length }})</h3>
+{% for h in items %}<div style="padding:8px 0;border-bottom:1px solid var(--line)"><span class="badge {{ h.status }}">{{ h.status }}</span> <code>{{ h.id }}</code>{% if h.superseded_by %} <small class="muted">→ reemplazada por {{ h.superseded_by }}</small>{% endif %}
+{% if h.status != "retirada" %}<p>{{ h.statement }}</p>{% if h.falsifier %}<small><strong>Refutaría:</strong> {{ h.falsifier }}</small>{% else %}<small class="muted">Sin criterio de refutación (formulada antes de existir ese requisito).</small>{% endif %}
+<br><small class="muted">{{ h.attempts }} intento(s) de refutación aprobado(s){% if h.evidence %} · evidencia: {% for e in h.evidence %}<code>{{ e }}</code> {% endfor %}{% endif %}</small>{% endif %}
+{% if not h.closed %}<details><summary>Retirar…</summary><form hx-post="{{ base }}retirar/{{ h.id }}/" hx-target="#tab" hx-swap="innerHTML">{% csrf_token %}<input type="hidden" name="reveal" value="{% if reveal %}1{% else %}0{% endif %}">
+<label>Motivo</label><input type="text" name="reason" required><label>Reemplazada por (opcional)</label><input type="text" name="superseded_by" placeholder="h-…"><p><button class="secondary" type="submit">Retirar hipótesis</button></p></form></details>{% endif %}</div>
+{% empty %}<p class="muted">Todavía no hay hipótesis. Pregúntale al agente o espera al triaje automático.</p>{% endfor %}</div>

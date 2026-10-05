@@ -1,0 +1,4 @@
+<div class="msg ok"><strong>Informe generado.</strong> <a class="btn" href="{{ base }}informe/descargar/{{ file }}/">Descargar {{ file }}</a><br>
+<small>SHA-256 del contenido: <code>{{ report.sha256 }}</code> · credenciales redactadas: {{ report.stats.redactions }} · comprobación de fugas: {{ report.stats.leak_scan }}</small>
+{% if report.warnings %}<br><small class="msg error">Aviso: la integridad de la cadena de custodia no se pudo verificar; revisa el anexo A.</small>{% endif %}</div>
+<div hx-get="{{ base }}tab/informe/?reveal={% if reveal %}1{% else %}0{% endif %}" hx-target="#tab" hx-trigger="load delay:200ms" hx-swap="innerHTML"></div>

@@ -126,7 +126,7 @@ de parámetros pueden ser descriptivos. Ambos son metadatos de esquema, no regis
 | **P1-a** | Fase LLM: una llamada que recibe solo el Data Profile y devuelve clasificación del log, confirmación del mapeo y consultas SQL propuestas (validadas con pydantic y ejecutadas en el motor seguro); zona horaria declarada por caso | Hecho |
 | **P1-b** | Agente. b.1 filtro de notebooks, perfilado canónico y resumen por rol · b.2 copia seudonimizada (`priv-1`) y agente, toolkit, ledger y replay sobre ella (`privacidad.md`) · b.3a texto del analista traducido a alias · b.3b falsabilidad (`falsabilidad.md`) · b.3c tope de tokens por pregunta y por caso, notas del analista visibles en cada pregunta, retirar hipótesis (`presupuesto_y_notas.md`) | Hecho |
 | **P1-c** | Conversación persistente en disco (`ws.checkpointer()`): una aprobación pendiente o una conversación en curso sobreviven a reiniciar el kernel; un hilo no se reanuda con otro prompt u otra copia de datos. Reproducibilidad: aviso en `run_query` y `nondeterministic` en el replay (`persistencia_y_reproducibilidad.md`) | Hecho |
-| **P2** | Entrega: reporte Markdown bilingüe generado desde el ledger (el formato y la estructura se acuerdan antes de generarlo), README, CLI (`dfir ingest`, `dfir ask`). El prompt del agente y sus avisos están solo en español: la versión en inglés va con el informe bilingüe. `nbstripout`: resuelto con `tools/strip_notebook_outputs.py` | Pendiente |
+| **P2** | Entrega. **Hecho:** informe forense Markdown bilingüe generado desde el ledger, en variante interna y compartible, con botón *Exportar* (`informe.md`); proyectos (una carpeta = un caso por archivo) con análisis automático al crearlos e interfaz web Django + HTMX (`interfaz_web.md`). **Pendiente:** README, CLI (`dfir ingest`, `dfir ask`), prompt del agente en inglés y PDF. `nbstripout`: resuelto con `tools/strip_notebook_outputs.py` | Parcial |
 | **P3** | Ampliación: logs no web (autenticación, EDR, firewall) con esquema canónico propio, Excel, GeoIP offline, inteligencia en PDF | Pendiente |
 
 **Transversal (fuera de P1–P3)**
@@ -140,7 +140,8 @@ de parámetros pueden ser descriptivos. Ambos son metadatos de esquema, no regis
 | Integridad forense más allá de la cadena de hashes: anclar el `head_hash` fuera de la máquina, copias fuera de WSL, plantilla de cadena de custodia, redacción de credenciales en reportes | Media | Pendiente |
 | Ingeniería de entrega: repositorio remoto, CI (`ruff` y `pytest`), lockfile, pre-commit, contenedor sin root, versionado y ADR | Media | Pendiente (repositorio remoto en manos del analista) |
 | Integración con el ecosistema: ingesta desde Falcon NG-SIEM/LogScale, salida como consultas de LogScale o reglas Sigma, exportar el ledger al gestor de casos | Media | Pendiente |
-| Después: multi-analista, interfaz web (Django y HTMX), modelo local para datos que no puedan salir | Baja | Pendiente |
+| Interfaz web local de un solo analista (Django y HTMX) | — | Hecha (P2). Pendiente: autenticación y multi-analista |
+| Después: multi-analista, modelo local para datos que no puedan salir | Baja | Pendiente |
 
 La fase LLM es P1, no P0: P0 termina en el perfil, el mapeo y el borrador de mapping, que ya es lo que se enviaría al modelo.
 
