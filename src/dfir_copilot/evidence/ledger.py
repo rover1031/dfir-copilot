@@ -399,6 +399,8 @@ class Ledger:
         (no verificada no es lo mismo que alterada, por eso no cuentan como `mismatches` en la entrada del ledger).
         Una consulta `DESCRIBE` que ya no coincide sale con `schema_drift=True`: lo que cambió es el esquema de la vista (p. ej. la
         columna derivada `timestamp_local` al declarar la zona), no los datos; va aparte, en `schema_drift`.
+        Si una consulta devuelve las mismas filas con otro contenido, se vuelve a ejecutar dos veces: si ELLA MISMA no da siempre lo
+        mismo (típico: `ORDER BY n DESC LIMIT 8` con empates en el corte) sale con `nondeterministic=True`, aparte de `mismatches`.
 
         Las re-ejecuciones son verificaciones, no análisis nuevo: no se añaden al historial del motor y el
         resultado queda como UNA entrada `replay` en el ledger (en vez de duplicar cada consulta).
@@ -439,6 +441,17 @@ class Ledger:
                 row = {**base, "replayed_rows": rows, "hash_match": hash_match, "match": match}
                 if not match and d["sql"].lstrip().upper().startswith("DESCRIBE"):
                     row["schema_drift"] = True  # el esquema de la vista cambió (p. ej. timestamp_local); los datos no
+                elif hash_match is False and rows == d["rows"]:
+                    # mismas filas y otro contenido: antes de llamarlo alteración, ¿la propia consulta da lo mismo dos veces?
+                    seen = {target.history[-1]["result_sha256"]}
+                    try:
+                        for _ in range(2):
+                            target.query(d["sql"], max_rows=d.get("limit"))
+                            seen.add(target.history[-1]["result_sha256"])
+                    except Exception:  # noqa: BLE001 - si el control falla, se queda como mismatch
+                        seen = {target.history[-1]["result_sha256"]}
+                    if len(seen) > 1:
+                        row["nondeterministic"] = True  # p. ej. ORDER BY con empates en el corte de un LIMIT
                 results.append(row)
             except Exception as exc:  # noqa: BLE001 - se reporta, no se oculta
                 results.append({**base, "replayed_rows": None, "hash_match": None, "match": False,
@@ -453,9 +466,11 @@ class Ledger:
                 c["matches"] += bool(r["match"])
             self.append("replay", {"queries": len(results), "matches": sum(r["match"] for r in results),
                                    "mismatches": [r["query_id"] for r in results
-                                                  if not r["match"] and not r.get("skipped") and not r.get("schema_drift")],
+                                                  if not r["match"] and not r.get("skipped") and not r.get("schema_drift")
+                                                  and not r.get("nondeterministic")],
                                    "skipped": [r["query_id"] for r in results if r.get("skipped")],
                                    "schema_drift": [r["query_id"] for r in results if r.get("schema_drift")],
+                                   "nondeterministic": [r["query_id"] for r in results if r.get("nondeterministic")],
                                    "by_copy": by,
                                    "hash_checked": sum(r["hash_match"] is not None for r in results),
                                    "hash_mismatches": [r["query_id"] for r in results if r["hash_match"] is False]})

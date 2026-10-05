@@ -1,6 +1,7 @@
 """Herramientas del agente: solo lectura, acotadas, sanitizadas y auditadas en el ledger."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -13,6 +14,9 @@ from dfir_copilot.evidence.ledger import candidate_id, finding_id, query_id
 from dfir_copilot.tools.sanitize import clean_text, render, sanitize
 
 Bucket = Literal["hour", "day", "week", "month"]
+_HAS_LIMIT = re.compile(r"\blimit\b", re.I)
+NOT_REPRODUCIBLE = ("Dos ejecuciones dieron resultados distintos: hay empates en el corte del LIMIT. Repite la consulta con "
+                    "desempates en el ORDER BY (p. ej. ORDER BY n DESC, valor) para que sea reproducible y verificable.")
 
 
 @dataclass(frozen=True)
@@ -21,6 +25,7 @@ class ToolLimits:
     max_cell_chars: int = 120   # caracteres por celda de texto
     max_chars: int = 8000       # tamaño total del resultado
     timeline_points: int = 60   # puntos de una serie temporal
+    check_reproducible: bool = True  # una consulta con LIMIT se ejecuta dos veces: si difieren, se avisa (ver `_run_query`)
 
 
 @dataclass(frozen=True)
@@ -145,6 +150,19 @@ class Toolkit:
         res = self.engine.query(args.sql, max_rows=self.limits.max_rows)
         out = self._shape(res)
         out["query_id"] = query_id(self.engine.history[-1])
+        if self.limits.check_reproducible and _HAS_LIMIT.search(args.sql):
+            first = self.engine.history[-1]["result_sha256"]
+            mark = len(self.engine.history)
+            try:  # el control no debe romper la consulta: si falla, simplemente no se avisa
+                self.engine.query(args.sql, max_rows=self.limits.max_rows)
+                again = self.engine.history[-1]["result_sha256"]
+            except Exception:  # noqa: BLE001
+                again = first
+            finally:
+                del self.engine.history[mark:]  # es una verificación, no análisis: no se registra como consulta aparte
+            if again != first:
+                out["reproducible"] = False
+                out["warning"] = NOT_REPRODUCIBLE
         return out
 
     def _profile(self, args: ProfileArgs) -> dict:

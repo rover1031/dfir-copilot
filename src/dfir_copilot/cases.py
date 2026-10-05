@@ -206,6 +206,19 @@ class CaseWorkspace:
         engine = QueryEngine(pseudo["output"]["path"], **engine_kwargs)  # verifica el hash del Parquet seudonimizado
         return engine, Pseudonymizer(pseudo)
 
+    @property
+    def agent_dir(self) -> Path:
+        return self.dir / "agent"
+
+    def checkpointer(self):
+        """Guardado en disco de la conversación del agente: `build_agent(..., checkpointer=ws.checkpointer())`.
+
+        Una aprobación pendiente o una conversación en curso sobreviven a reiniciar el kernel. Vive en `agent/threads.json`,
+        fuera de `raw/`, `processed/` y `ledger/`: no forma parte de lo que sella el caso."""
+        from dfir_copilot.agent.persist import FileCheckpointer
+
+        return FileCheckpointer(self.agent_dir / "threads.json")
+
     def ledger(self, engine: QueryEngine | None = None, analyst: str | None = None) -> Ledger:
         engine = engine or self.engine()
         return Ledger.open(self.case_id, engine, analyst=analyst or self.meta.get("analyst"), root=self.ledger_dir)

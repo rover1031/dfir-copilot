@@ -10,7 +10,9 @@ mensajes añadidos al final, nunca modificando lo anterior.
 """
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
 from typing import Annotated, Literal, TypedDict
 
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage, ToolMessage
@@ -22,6 +24,7 @@ from langgraph.types import Command, interrupt
 from pydantic import BaseModel, Field, ValidationError
 
 from dfir_copilot.agent.hypotheses import DecisionRequest, HypothesisBook, HypothesisError
+from dfir_copilot.agent.persist import ThreadStale
 from dfir_copilot.privacy import PrivacyError, Pseudonymizer, TextResult, privacy_context
 from dfir_copilot.tools import Toolkit, ToolLimits
 from dfir_copilot.tools.sanitize import clean_text, render, sanitize
@@ -43,6 +46,9 @@ como hallazgo.
 4. Declara los límites del dato: la zona horaria puede no estar verificada, algunas columnas no tienen datos y un \
 HTTP 200 no prueba que se devolvió contenido.
 5. Sé económico: prefiere agregados y consultas acotadas; no repitas consultas ya hechas.
+6. Con LIMIT, ordena de forma total: añade desempates al ORDER BY (p. ej. ORDER BY n DESC, valor). El ledger vuelve \
+a ejecutar tus consultas y una con empates en el corte no se puede verificar. Si run_query avisa de que una consulta \
+no es reproducible, repítela con desempates.
 
 MÉTODO
 - Al inicio de cada pregunta recibes el estado de las hipótesis del caso y las notas del analista (contexto que él \
@@ -154,7 +160,7 @@ class DfirAgent:
     def __init__(self, engine, ledger, llm, *, analyst: str | None = None, max_steps: int = 12,
                  limits: ToolLimits = ToolLimits(), allow_real: bool = False,
                  pseudonymizer: Pseudonymizer | None = None, max_tokens: int = DEFAULT_MAX_TOKENS,
-                 max_tokens_case: int | None = None):
+                 max_tokens_case: int | None = None, checkpointer=None):
         """`engine`: el motor sobre la COPIA SEUDONIMIZADA (`engine, ps = ws.pseudonymized()`); lo que devuelven sus herramientas
         viaja a un LLM externo. Con datos reales se rechaza salvo `allow_real=True` (datos sintéticos o no sensibles): queda
         constancia en el ledger, cada turno lleva la copia sobre la que corrió.
@@ -164,7 +170,10 @@ class DfirAgent:
 
         Presupuesto: `max_tokens` por pregunta (por defecto 210 000; cuenta los tokens totales de todas las llamadas al modelo
         de esa pregunta, incluida la reanudación tras una aprobación) y `max_tokens_case` acumulado en el caso (opcional; se
-        calcula desde el ledger, así que sobrevive a reiniciar el kernel)."""
+        calcula desde el ledger, así que sobrevive a reiniciar el kernel).
+
+        `checkpointer`: dónde se guarda la conversación. Por defecto en memoria (se pierde al reiniciar el kernel); con
+        `ws.checkpointer()` queda en disco y una aprobación pendiente o una conversación en curso se retoman tras reiniciar."""
         for name, value in (("max_tokens", max_tokens), ("max_tokens_case", max_tokens_case)):
             if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 1):
                 raise ValueError(f"{name} debe ser un entero positivo")
@@ -187,6 +196,7 @@ class DfirAgent:
         tools += [StructuredTool(name=n, description=d, args_schema=m, func=_noop)
                   for n, (m, d) in HYPOTHESIS_TOOLS.items()]
         self._llm_tools = llm.bind_tools(tools)  # siempre el mismo enlace: ver "invariante de prefijo"
+        self._checkpointer = checkpointer if checkpointer is not None else InMemorySaver()
         self.graph = self._build()
 
     # --- contexto ---------------------------------------------------------------------------
@@ -357,7 +367,7 @@ class DfirAgent:
         g.add_conditional_edges("agent", after_agent, {"tools": "tools", END: END})
         g.add_conditional_edges("tools", after_tools, {"review": "review", "agent": "agent"})
         g.add_edge("review", "agent")
-        return g.compile(checkpointer=InMemorySaver())
+        return g.compile(checkpointer=self._checkpointer)
 
     # --- herramientas de hipótesis ----------------------------------------------------------------
     def _hypothesis_call(self, name: str, args: dict, cid: str):
@@ -453,6 +463,7 @@ class DfirAgent:
                                "(el ledger conserva todo lo hecho)")
         clean = self.preview(question.strip(), literal)  # antes de nada: si es ambiguo no se envía ni se registra
         self._check_case_budget()
+        self._check_thread(thread_id)
         self._seen_tokens[thread_id] = 0
         first = HumanMessage(f"{self.briefing()}\n\nPREGUNTA DEL ANALISTA:\n{clean.text}")
         result = self._run({"messages": [first], "steps": 0, "tokens": 0, "pending": [], "cut": None}, thread_id, clean.text,
@@ -510,6 +521,7 @@ class DfirAgent:
         `AmbiguousText` ANTES de reanudar: la aprobación sigue pendiente y puedes reescribir la nota."""
         if not self.pending(thread_id):
             raise ValueError("No hay ninguna aprobación pendiente en este hilo")
+        self._check_thread(thread_id)
         cleaned = [self.preview(d.get("note") or "", literal) for d in decisions]
         decisions = [{**d, "note": c.text} for d, c in zip(decisions, cleaned, strict=True)]
         sent = " | ".join(c.text for c in cleaned if c.text) or None
@@ -522,6 +534,53 @@ class DfirAgent:
         pending = self.pending(thread_id)
         return self.resume([{"hypothesis_id": r["hypothesis_id"], "decision": decision, "note": note} for r in pending],
                            thread_id, literal)
+
+    @property
+    def prompt_sha(self) -> str:
+        """Huella del prompt de sistema vigente: un hilo solo se reanuda con el mismo prompt (invariante de prefijo)."""
+        return hashlib.sha256(str(self.system_prompt().content).encode("utf-8")).hexdigest()[:16]
+
+    def _check_thread(self, thread_id: str) -> None:
+        """Antes de continuar un hilo: ¿se creó con este mismo prompt y esta misma copia de datos?
+
+        Con otro prompt la API rechaza los bloques de razonamiento firmados contra el anterior; con otra copia los alias no serían
+        los mismos. Un hilo nuevo registra con qué nació. Solo actúa con un guardado que recuerde metadatos (el de disco)."""
+        meta_api = getattr(self._checkpointer, "get_meta", None)
+        if meta_api is None:
+            return
+        has_history = bool(self._snapshot(thread_id).values.get("messages"))
+        meta = meta_api(thread_id)
+        if has_history and meta:
+            if meta.get("prompt_sha") != self.prompt_sha or meta.get("copy_id") != self.engine.copy_id:
+                raise ThreadStale(
+                    f"El hilo '{thread_id}' se creó con otro prompt de sistema u otra copia de datos (el modelo rechazaría su "
+                    f"razonamiento previo y los alias no coincidirían). Descártalo con reset('{thread_id}') o usa otro thread_id; "
+                    f"el ledger, las hipótesis y las notas se conservan.")
+        elif not has_history:
+            self._checkpointer.set_meta(thread_id, prompt_sha=self.prompt_sha, copy_id=self.engine.copy_id,
+                                        created_at=datetime.now(UTC).isoformat(timespec="seconds"))
+
+    def threads(self) -> list[dict]:
+        """Hilos guardados y si se pueden continuar con este agente (mismo prompt y misma copia)."""
+        names = getattr(self._checkpointer, "threads", None)
+        ids = names() if names else sorted(getattr(self._checkpointer, "storage", {}))
+        out = []
+        for tid in ids:
+            meta = (getattr(self._checkpointer, "get_meta", lambda _t: None)(tid)) or {}
+            out.append({"thread_id": tid, "created_at": meta.get("created_at"),
+                        "continuable": bool(meta) and meta.get("prompt_sha") == self.prompt_sha
+                        and meta.get("copy_id") == self.engine.copy_id,
+                        "pending": bool(self.pending(tid))})
+        return out
+
+    def _seen(self, thread_id: str) -> int:
+        """Tokens ya registrados de este hilo. Tras un reinicio no están en memoria: se leen del ledger (el último turno, si
+        quedó pendiente de aprobación; si no, la siguiente pregunta empieza de cero)."""
+        if thread_id in self._seen_tokens:
+            return self._seen_tokens[thread_id]
+        turns = [e["data"] for e in self.ledger.entries("agent_turn") if e["data"].get("thread_id") == thread_id]
+        last = turns[-1] if turns else None
+        return (last.get("tokens") or 0) if last and last.get("status") == "needs_approval" else 0
 
     def reset(self, thread_id: str = "default") -> None:
         """Descarta la conversación de un hilo (no toca el ledger ni las hipótesis)."""
@@ -546,8 +605,11 @@ class DfirAgent:
                 if stop == "max_tokens":
                     answer += "\n\n[AVISO: la respuesta se cortó por el límite de tokens; sube LLM_MAX_TOKENS en el .env.]"
         tokens, cut = values.get("tokens", 0), values.get("cut")
-        delta = tokens - self._seen_tokens.get(thread_id, 0)
+        delta = tokens - self._seen(thread_id)
         self._seen_tokens[thread_id] = tokens
+        compact = getattr(self._checkpointer, "compact", None)
+        if compact:  # la conversación guardada no crece sin límite: se queda el último punto del hilo
+            compact(thread_id)
         result = AgentResult(status, answer, approvals, values.get("steps", 0), tokens, thread_id, cut_by=cut)
         self.ledger.append("agent_turn", {
             "thread_id": thread_id, "question": question, "status": status, "answer": answer, "model": self.model_name,
