@@ -67,3 +67,34 @@ class ProfileInterpretation(_M):
     mapping_review: list[MappingReview] = Field(default_factory=list)
     proposed_queries: list[ProposedQuery] = Field(default_factory=list)
     analyst_questions: list[AnalystQuestion] = Field(default_factory=list)
+
+
+# Palabras clave de JSON Schema que la salida estructurada de la API puede no admitir. No se envían al modelo: el rango, el
+# largo y el patrón se comprueban igualmente al validar con pydantic, y lo que no cumpla se rechaza con un código claro.
+_UNSUPPORTED_KEYWORDS = frozenset({
+    "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf",
+    "minLength", "maxLength", "pattern", "minItems", "maxItems", "uniqueItems", "format", "default", "title",
+})
+
+
+def wire_schema() -> dict:
+    """JSON Schema de `ProfileInterpretation` para enviar a la API: misma forma, sin restricciones de valor."""
+    schema = ProfileInterpretation.model_json_schema()
+    # `properties` contiene NOMBRES de campo: si un campo se llamara como una palabra clave, no debe borrarse.
+    def walk(node):
+        if isinstance(node, dict):
+            out = {}
+            for k, v in node.items():
+                if k == "properties" and isinstance(v, dict):
+                    out[k] = {name: walk(sub) for name, sub in v.items()}
+                elif k in _UNSUPPORTED_KEYWORDS:
+                    continue
+                else:
+                    out[k] = walk(v)
+            return out
+        if isinstance(node, list):
+            return [walk(v) for v in node]
+        return node
+    wire = walk(schema)
+    wire["title"] = "ProfileInterpretation"  # LangChain exige un título en la raíz de un esquema en forma de diccionario
+    return wire
