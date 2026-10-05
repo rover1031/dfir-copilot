@@ -7,8 +7,13 @@ import os
 import re
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+
+try:  # bloqueo de archivo: evita que dos kernels abiertos sobre el mismo caso bifurquen la cadena
+    import fcntl
+except ImportError:  # pragma: no cover - solo Windows nativo; el proyecto corre en Linux (Docker)
+    fcntl = None
 
 LEDGER_VERSION = 1
 GENESIS = "0" * 64
@@ -58,27 +63,55 @@ def candidate_id(case, dataset_sha256: str) -> str:
 
 
 class Ledger:
-    """Bitácora de un caso. Úsala con `Ledger.open(...)`."""
+    """Bitácora de un caso. Úsala con `Ledger.open(...)`.
+
+    Varias instancias (p. ej. dos notebooks) pueden escribir en el mismo caso: cada escritura toma un bloqueo
+    de archivo y relee lo que otro haya añadido antes de enlazar su entrada a la cadena.
+    """
 
     def __init__(self, path: str | Path, dataset_sha256: str):
         self.path = Path(path)
         self.dataset_sha256 = dataset_sha256
         self._entries: list[dict] = []
+        self._size = 0
         if self.path.exists():
             result = self.verify()
             if not result.ok:
                 raise LedgerCorrupt(f"{self.path}: {result.error}")
-            self._entries = [json.loads(line) for line in
-                             self.path.read_text(encoding="utf-8").splitlines() if line.strip()]
-        self._queries = {e["data"]["query_id"] for e in self._entries if e["type"] == "query"}
-        self._findings = {e["data"]["finding_id"] for e in self._entries if e["type"] == "finding"}
-        self._candidates = {e["data"]["candidate_id"] for e in self._entries if e["type"] == "case_candidate"}
-        self._hypotheses = {e["data"]["hypothesis_id"] for e in self._entries if e["type"] == "hypothesis"}
+            self._load()
+        else:
+            self._reindex()
+
+    # --- sincronización con el disco ----------------------------------------------------------
+    def _disk_size(self) -> int:
+        return self.path.stat().st_size if self.path.exists() else 0
+
+    def _load(self) -> None:
+        text = self.path.read_text(encoding="utf-8") if self.path.exists() else ""
+        self._entries = [json.loads(line) for line in text.splitlines() if line.strip()]
+        self._size = len(text.encode("utf-8"))
+        self._reindex()
+
+    def _reindex(self) -> None:
+        e = self._entries
+        self._queries = {x["data"]["query_id"] for x in e if x["type"] == "query"}
+        self._findings = {x["data"]["finding_id"] for x in e if x["type"] == "finding"}
+        self._candidates = {x["data"]["candidate_id"] for x in e if x["type"] == "case_candidate"}
+        self._hypotheses = {x["data"]["hypothesis_id"] for x in e if x["type"] == "hypothesis"}
+
+    def _sync(self) -> None:
+        """Si otra instancia escribió, recarga lo que añadió."""
+        if self._disk_size() != self._size:
+            self._load()
+
+    def refresh(self) -> None:
+        """Fuerza la relectura desde disco (útil para ver lo que escribió otro notebook)."""
+        self._load()
 
     # --- apertura -------------------------------------------------------------------------
     @classmethod
     def open(cls, case_id: str, engine, analyst: str | None = None,
-             root: str | Path = "/workspace/data/ledger") -> "Ledger":
+             root: str | Path = "/workspace/data/ledger") -> Ledger:
         if not _CASE_ID.match(case_id):
             raise ValueError("case_id solo admite letras, números, '.', '_' y '-' (máx. 64)")
         if engine.manifest is None:
@@ -111,27 +144,36 @@ class Ledger:
 
     # --- escritura ------------------------------------------------------------------------
     def append(self, type_: str, data: dict) -> dict:
-        entry = {
-            "seq": len(self._entries) + 1,
-            "ts_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "type": type_,
-            "data": data,
-            "prev_hash": self.head_hash,
-        }
-        entry["hash"] = _sha(_canon(entry))
-        line = _canon(entry)
         with open(self.path, "a", encoding="utf-8") as fh:
-            fh.write(line + "\n")
-            fh.flush()
-            os.fsync(fh.fileno())
-        stored = json.loads(line)
-        self._entries.append(stored)
-        if type_ == "hypothesis":
-            self._hypotheses.add(data["hypothesis_id"])
-        return stored
+            if fcntl:
+                fcntl.flock(fh, fcntl.LOCK_EX)
+            try:
+                self._sync()  # dentro del bloqueo: nadie más puede escribir entre la lectura y la escritura
+                entry = {
+                    "seq": len(self._entries) + 1,
+                    "ts_utc": datetime.now(UTC).isoformat(timespec="seconds"),
+                    "type": type_,
+                    "data": data,
+                    "prev_hash": self._entries[-1]["hash"] if self._entries else GENESIS,
+                }
+                entry["hash"] = _sha(_canon(entry))
+                line = _canon(entry)
+                fh.write(line + "\n")
+                fh.flush()
+                os.fsync(fh.fileno())
+                stored = json.loads(line)
+                self._entries.append(stored)
+                self._size += len((line + "\n").encode("utf-8"))
+                if type_ == "hypothesis":
+                    self._hypotheses.add(data["hypothesis_id"])
+                return stored
+            finally:
+                if fcntl:
+                    fcntl.flock(fh, fcntl.LOCK_UN)
 
     def record_queries(self, queries) -> int:
         """Registra consultas (cualquier estado: las rechazadas también son auditoría). Devuelve cuántas son nuevas."""
+        self._sync()
         new = 0
         for q in queries:
             qid = query_id(q)
@@ -143,6 +185,7 @@ class Ledger:
 
     def record_runs(self, runs) -> dict:
         """Registra consultas, hallazgos y ejecuciones de detectores. Los hallazgos ya vistos no se duplican."""
+        self._sync()
         counts = {"queries": 0, "findings": 0, "runs": 0}
         for run in runs:
             counts["queries"] += self.record_queries(run.queries)
@@ -168,6 +211,7 @@ class Ledger:
 
     def record_cases(self, cases) -> int:
         """Registra los casos candidatos de `correlate()`. Exige que sus hallazgos ya estén en el ledger."""
+        self._sync()
         new = 0
         for c in cases:
             fids = sorted({finding_id(f, self.dataset_sha256) for f in c.findings})
@@ -200,16 +244,20 @@ class Ledger:
     # --- lectura y verificación ----------------------------------------------------------
     def known_refs(self) -> set[str]:
         """Identificadores citables como evidencia o referencia: consultas, hallazgos, casos e hipótesis."""
+        self._sync()
         return self._queries | self._findings | self._candidates | self._hypotheses
 
     @property
     def head_hash(self) -> str:
+        self._sync()
         return self._entries[-1]["hash"] if self._entries else GENESIS
 
     def entries(self, type_: str | None = None) -> list[dict]:
+        self._sync()
         return [e for e in self._entries if type_ is None or e["type"] == type_]
 
     def summary(self) -> dict:
+        self._sync()
         counts = Counter(e["type"] for e in self._entries)
         return {"path": str(self.path), "entries": len(self._entries), "head_hash": self.head_hash,
                 "dataset_sha256": self.dataset_sha256, "counts": dict(counts)}
@@ -233,10 +281,15 @@ class Ledger:
             return VerifyResult(False, n, prev, f"no se pudo leer el ledger: {exc}")
         return VerifyResult(True, n, prev)
 
-    def replay(self, engine) -> list[dict]:
-        """Re-ejecuta las consultas registradas y compara el número de filas devueltas."""
+    def replay(self, engine, record: bool = True) -> list[dict]:
+        """Re-ejecuta las consultas registradas y compara el número de filas devueltas.
+
+        Las re-ejecuciones son verificaciones, no análisis nuevo: no se añaden al historial del motor y el
+        resultado queda como UNA entrada `replay` en el ledger (en vez de duplicar cada consulta).
+        """
         if engine.dataset_sha256 != self.dataset_sha256:
             raise DatasetMismatch("El motor usa un dataset distinto al del ledger")
+        mark = len(engine.history)
         results = []
         for e in self.entries("query"):
             d = e["data"]
@@ -249,4 +302,8 @@ class Ledger:
             except Exception as exc:  # noqa: BLE001 - se reporta, no se oculta
                 results.append({"query_id": d["query_id"], "recorded_rows": d["rows"],
                                 "replayed_rows": None, "match": False, "error": f"{type(exc).__name__}: {exc}"})
+        del engine.history[mark:]
+        if record:
+            self.append("replay", {"queries": len(results), "matches": sum(r["match"] for r in results),
+                                   "mismatches": [r["query_id"] for r in results if not r["match"]]})
         return results

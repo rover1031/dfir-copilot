@@ -35,7 +35,6 @@ def make_engine(engine_from_rows):
 
 # --- modelo simulado para probar el agente sin gastar tokens ---------------------------------
 from langchain_core.language_models.chat_models import BaseChatModel  # noqa: E402
-from langchain_core.messages import AIMessage  # noqa: E402
 from langchain_core.outputs import ChatGeneration, ChatResult  # noqa: E402
 
 

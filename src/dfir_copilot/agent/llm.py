@@ -26,7 +26,7 @@ class LLMConfig:
     timeout_s: float = 60.0
 
     @classmethod
-    def from_env(cls, env: Mapping[str, str] | None = None) -> "LLMConfig":
+    def from_env(cls, env: Mapping[str, str] | None = None) -> LLMConfig:
         env = os.environ if env is None else env
         raw_temp = env.get("LLM_TEMPERATURE", "").strip().lower()
         try:

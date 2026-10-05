@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import duckdb
@@ -37,6 +37,20 @@ def sha256_file(path: Path, chunk: int = 1 << 20) -> str:
     return h.hexdigest()
 
 
+def _check_regex(name: str, regex: str) -> None:
+    """Valida la regex con el propio motor (RE2) y exige un grupo de captura: sin él devolvería siempre vacío."""
+    try:
+        duckdb.connect().execute("SELECT regexp_extract('', ?, 1)", [regex])
+    except duckdb.Error as exc:
+        raise ValueError(f"'{name}': regex inválida: {str(exc).splitlines()[0]}") from exc
+    try:
+        groups = re.compile(regex).groups
+    except re.error:  # sintaxis válida en RE2 pero no en Python: no se pueden contar los grupos
+        return
+    if groups < 1:
+        raise ValueError(f"'{name}': la regex necesita un grupo de captura, p. ej. 'clave=([^&]+)'")
+
+
 def _validate(m: dict) -> None:
     for key in ("source", "format", "fields", "timestamp"):
         if key not in m:
@@ -60,6 +74,7 @@ def _validate(m: dict) -> None:
             raise ValueError(f"'{name}' requiere 'from' y 'regex'")
         if spec.get("type", "VARCHAR").upper() not in _TYPES:
             raise ValueError(f"Tipo no permitido en '{name}': {spec['type']}")
+        _check_regex(name, spec["regex"])
 
 
 def load_mapping(source: str) -> dict:
@@ -179,7 +194,7 @@ def ingest_csv(
         f"CAST(max(timestamp_utc) AS VARCHAR), {nulls_sql} FROM {pq}"
     ).fetchone()
     rows_out, ts_min, ts_max, *null_list = row
-    null_counts = dict(zip(cols, null_list))
+    null_counts = dict(zip(cols, null_list, strict=True))
     con.close()
 
     tz_cfg = mapping["timestamp"]
@@ -194,7 +209,7 @@ def ingest_csv(
     manifest = {
         "manifest_version": 1,
         "source": source,
-        "ingested_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "ingested_at_utc": datetime.now(UTC).isoformat(timespec="seconds"),
         "duckdb_version": duckdb.__version__,
         "input": {
             "path": str(csv_path),

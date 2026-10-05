@@ -44,7 +44,7 @@ def profiler(tmp_path):
 
 def test_overview(profiler):
     r = profiler.overview()
-    cols = dict(zip(r.columns, r.rows[0]))
+    cols = dict(zip(r.columns, r.rows[0], strict=True))
     assert cols["filas"] == 44
     assert cols["user_id_distintos"] == 2 and cols["src_ip_distintos"] == 3
 

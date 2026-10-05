@@ -4,8 +4,8 @@ import json
 import pytest
 
 from dfir_copilot.detectors import correlate, run_detectors
-from dfir_copilot.evidence.ledger import DatasetMismatch, Ledger, LedgerCorrupt
 from dfir_copilot.engine.query_engine import QueryRejected
+from dfir_copilot.evidence.ledger import DatasetMismatch, Ledger, LedgerCorrupt
 
 
 @pytest.fixture()
@@ -63,7 +63,7 @@ def test_detecta_una_edicion_del_contenido(recorded):
     ledger, _, _, root, _ = recorded
     path = root / "CASO-001.jsonl"
     lines = path.read_text(encoding="utf-8").splitlines()
-    i = next(i for i, l in enumerate(lines) if '"type":"finding"' in l and '"severity":"medium"' in l)
+    i = next(i for i, ln in enumerate(lines) if '"type":"finding"' in ln and '"severity":"medium"' in ln)
     lines[i] = lines[i].replace('"severity":"medium"', '"severity":"low"')
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     result = ledger.verify()
@@ -168,3 +168,61 @@ def test_replay_con_otro_dataset_falla(recorded, make_engine):
     other_engine, _ = make_engine(seed=99)
     with pytest.raises(DatasetMismatch):
         ledger.replay(other_engine)
+
+
+# --- varias instancias sobre el mismo caso (p. ej. dos notebooks abiertos) -------------------------
+def test_dos_instancias_no_bifurcan_la_cadena(case):
+    ledger, engine, _, root = case
+    other = Ledger.open("CASO-001", engine, root=root)  # "otro notebook"
+    ledger.note("desde A")
+    other.note("desde B")  # B no sabía de A
+    ledger.note("otra vez desde A")
+    result = ledger.verify()
+    assert result.ok and result.entries == 4
+    assert [e["seq"] for e in other.entries()] == [1, 2, 3, 4]  # B ve lo que escribió A
+    assert ledger.head_hash == other.head_hash
+
+
+def test_escrituras_concurrentes_desde_hilos_mantienen_la_cadena(case):
+    import threading
+
+    ledger, engine, _, root = case
+    errors = []
+
+    def worker(n):
+        try:
+            mine = Ledger.open("CASO-001", engine, root=root)
+            for i in range(15):
+                mine.note(f"hilo {n} nota {i}")
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(n,)) for n in range(4)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    assert not errors
+    result = ledger.verify()
+    assert result.ok and result.entries == 1 + 4 * 15
+
+
+def test_refresh_y_lecturas_ven_lo_que_escribio_otra_instancia(case):
+    ledger, engine, _, root = case
+    other = Ledger.open("CASO-001", engine, root=root)
+    other.note("nota de B")
+    assert len(ledger.entries("note")) == 1  # A la ve sin escribir nada
+    ledger.refresh()
+    assert ledger.summary()["counts"]["note"] == 1
+
+
+# --- replay: una sola entrada, sin ensuciar el historial -------------------------------------------
+def test_replay_deja_una_entrada_y_no_ensucia_el_historial(recorded):
+    ledger, engine, _, _, _ = recorded
+    before_queries = len(ledger.entries("query"))
+    history_len = len(engine.history)
+    results = ledger.replay(engine)
+    assert len(engine.history) == history_len  # las re-ejecuciones no son consultas nuevas
+    ledger.record_queries(engine.history)  # y por tanto no se duplican al registrar el historial
+    assert len(ledger.entries("query")) == before_queries
+    (entry,) = ledger.entries("replay")
+    assert entry["data"]["queries"] == len(results) and entry["data"]["matches"] == len(results)
+    assert entry["data"]["mismatches"] == [] and ledger.verify().ok

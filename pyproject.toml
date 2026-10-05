@@ -26,5 +26,12 @@ openai = ["langchain-openai>=1.0"]
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+ignore = ["E501", "E402", "B008", "UP007", "SIM108"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

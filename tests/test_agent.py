@@ -49,7 +49,8 @@ def setup(tmp_path, make_engine, scripted):
     return make, ledger, engine, truth
 
 
-FULL = lambda: [  # noqa: E731 - guion de una investigación completa
+def FULL():  # guion de una investigación completa
+    return [
     call("describe_dataset"), call("run_detectors"),
     call("propose_hypothesis", statement=STATEMENT, rationale="Lo sugieren los detectores", test_plan="Contrastar"),
     call("update_hypothesis", hypothesis_id=HID, status="en_prueba"),

@@ -3,7 +3,7 @@ import pytest
 
 from dfir_copilot.evidence.ledger import Ledger
 from dfir_copilot.synthetic import make_idor_dataset
-from dfir_copilot.tools import ToolLimits, Toolkit
+from dfir_copilot.tools import Toolkit, ToolLimits
 from dfir_copilot.tools.sanitize import CLOSE_TAG, clean_text, render, sanitize, scan
 
 BENIGN_UAS = [

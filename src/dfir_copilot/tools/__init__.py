@@ -1,2 +1,2 @@
 """Herramientas del agente (solo lectura, acotadas y auditadas)."""
-from dfir_copilot.tools.toolkit import ToolLimits, ToolOutput, Toolkit  # noqa: F401
+from dfir_copilot.tools.toolkit import Toolkit, ToolLimits, ToolOutput  # noqa: F401

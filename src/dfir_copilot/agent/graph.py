@@ -22,7 +22,7 @@ from langgraph.types import Command, interrupt
 from pydantic import BaseModel, Field, ValidationError
 
 from dfir_copilot.agent.hypotheses import DecisionRequest, HypothesisBook, HypothesisError
-from dfir_copilot.tools import ToolLimits, Toolkit
+from dfir_copilot.tools import Toolkit, ToolLimits
 from dfir_copilot.tools.sanitize import clean_text, render, sanitize
 
 SYSTEM_PROMPT = """\

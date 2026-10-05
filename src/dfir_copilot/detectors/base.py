@@ -56,7 +56,7 @@ def ensure_columns(engine: QueryEngine, columns: list[str]) -> None:
         raise NotApplicable(f"faltan columnas: {missing}")
     counts = ", ".join('count("{0}") AS "{0}"'.format(c.replace('"', '""')) for c in columns)
     res = engine.query(f"SELECT {counts} FROM logs")
-    empty = [c for c, n in zip(res.columns, res.rows[0]) if n == 0]
+    empty = [c for c, n in zip(res.columns, res.rows[0], strict=True) if n == 0]
     if empty:
         raise NotApplicable(f"columnas sin datos en este dataset: {empty}")
 

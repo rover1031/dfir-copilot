@@ -108,7 +108,7 @@ class Toolkit:
             "dataset_sha256": self.engine.dataset_sha256,
             "columns": dict(self.profiler.columns),
             "columns_without_data": empty,
-            "overview": dict(zip(ov.columns, ov.rows[0])),
+            "overview": dict(zip(ov.columns, ov.rows[0], strict=True)),
             "timezone": m.get("timezone", {}),
             "detectors": available(),
         }

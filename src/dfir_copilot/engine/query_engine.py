@@ -5,7 +5,7 @@ import json
 import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import duckdb
@@ -139,7 +139,7 @@ class QueryEngine:
 
     def query(self, sql: str, *, max_rows: int | None = None) -> QueryResult:
         limit = min(max_rows, self.max_rows) if max_rows else self.max_rows
-        started = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        started = datetime.now(UTC).isoformat(timespec="seconds")
         t0 = time.perf_counter()
         try:
             text = self._validate(sql)
