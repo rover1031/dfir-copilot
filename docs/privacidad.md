@@ -120,11 +120,39 @@ Si sigue vigente, se vuelve a formular con alias.
 Además, `describe_dataset` ya no envía `timezone.note` (texto libre del analista: quién declaró la zona y cuándo); P1-a ya lo
 excluía del perfil y el toolkit lo dejaba pasar.
 
+### Lo que escribes tú: preguntas y notas (P1-b.3a)
+
+Lo que escribes en `ask()` y en la nota de `resolve()` también llega al modelo. Con la copia, pasa antes por el diccionario local
+(`Pseudonymizer.alias_text`, la inversa de `reveal_any`) y los valores reales se sustituyen por su alias. El agente abre el
+diccionario él solo desde el manifiesto de la copia: no hay un parámetro que se pueda olvidar.
+
+```python
+agent.preview("¿Qué otras cuentas usaron 66.6.6.1?").text   # qué recibiría el modelo, sin llamarlo (no gasta API)
+r = agent.ask("¿Qué otras cuentas usaron 66.6.6.1?")
+r.sent            # lo que se envió, ya en alias: "¿Qué otras cuentas usaron IP-0042?"
+r.substitutions   # ({"column": "src_ip", "alias": "IP-0042", "count": 1},) — nunca el valor real
+```
+
+* **Qué se traduce.** Los valores reales de las columnas con alias y de IP, y las redes (`/24`, `/64`). Coincidencia exacta,
+  distingue mayúsculas, con límites de palabra: `10.1.0.1` no se toca dentro de `10.1.0.10`. Ante un solape gana el valor más largo.
+* **Qué se bloquea (`AmbiguousText`).** Un valor que solo tiene dígitos o menos de 4 caracteres puede ser el identificador o una cifra
+  corriente, y un número de 6+ dígitos que cae en el rango real de una columna desplazada (un id de factura) no se puede traducir
+  a ciegas. No se envía nada ni se registra nada, y el mensaje dice qué escribir (`su alias es U-0042`, `el modelo lo ve como 123`).
+  Si es una cifra corriente, confírmalo con `literal=("12345",)`; queda anotado el recuento, no el valor.
+* **Notas de aprobación.** Se traducen igual. Si una es ambigua, la excepción salta **antes** de reanudar: la aprobación sigue pendiente y
+  puedes reescribir la nota. La nota que queda en el ledger (`hypothesis_update`) es la ya traducida.
+* **Ledger.** `agent_turn.question` guarda lo enviado (en alias) y `text_substitutions` / `text_literal` los recuentos. Los valores
+  reales no se escriben. Para leerlo tú: `ps.reveal_any(texto)`.
+* **Coste.** Una búsqueda por valor del diccionario; con 60 000 valores tarda décimas de segundo. Con millones de valores distintos
+  conviene medirlo.
+
 ### Qué NO cubre todavía
 
-* **Texto libre del analista hacia el modelo**: la pregunta de `ask()` y la nota de `resolve()`. Si escribes `66.6.6.1` en una
-  pregunta, viaja tal cual (y el modelo no lo encontrará: en la copia es `IP-0042`). Escribe con alias; la traducción o el bloqueo
-  automático es candidato a P1-b.3, junto a las notas del analista.
+* **Valores en otra forma.** No distingue mayúsculas de minúsculas, ni detecta un valor partido o escrito con otra puntuación
+  (`66.6.6. 1`). El diccionario solo conoce lo que está en el dataset.
+* **Números desplazados escritos con otro sentido.** Un número de 6+ dígitos por encima del mínimo real de una columna desplazada se
+  trata como posible id y se bloquea hasta que lo confirmes con `literal` o lo escribas como lo ve el modelo.
+* **`ledger.note()`** (notas tuyas al ledger) no pasa por el modelo y no se traduce; lo que escribas ahí se queda como lo escribas.
 * `CaseWorkspace.verify()` aún no comprueba la copia (hash del Parquet seudonimizado y del diccionario frente a la entrada
   `data_copy`); hoy lo comprueban `QueryEngine` y `Pseudonymizer` al abrirlos.
 * Con `resource` inferido como `endpoint` (log sin identificador de recurso), el recurso queda enmascarado a `{id}` y la

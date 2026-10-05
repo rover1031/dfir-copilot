@@ -39,6 +39,25 @@ POLICY_VERSION = "priv-1"
 class PrivacyError(Exception):
     """Se intentó entregar al LLM algo que no sale de la copia seudonimizada."""
 
+
+class AmbiguousText(PrivacyError):
+    """El texto del analista lleva algo que podría ser un identificador real y no se puede traducir con seguridad."""
+
+    def __init__(self, items):
+        self.items = tuple(items)  # [{"token", "column", "hint"}]
+        parts = ", ".join(f"'{i['token']}' ({i['column']}; {i['hint']})" for i in self.items)
+        super().__init__(f"El texto contiene valores que podrían ser identificadores reales y no se pueden traducir con "
+                         f"seguridad: {parts}. Escríbelos con su alias o, si son cifras corrientes, pásalos en literal=(...).")
+
+
+@dataclass(frozen=True)
+class TextResult:
+    """Texto del analista ya listo para el modelo. `substitutions` lleva columna, alias y cuántas veces; nunca el valor real."""
+
+    text: str
+    substitutions: tuple = ()
+    literal_used: int = 0
+
 TREATMENTS = ("alias", "ip", "shift", "mask_values", "mask_ids", "scrub", "keep")
 _NUMERIC = {"BIGINT", "INTEGER", "SMALLINT", "TINYINT", "HUGEINT", "DOUBLE", "FLOAT", "DECIMAL", "UBIGINT", "UINTEGER"}
 DEFAULT_RULES = {
@@ -326,3 +345,58 @@ class Pseudonymizer:
         pattern = re.compile(r"(?<![A-Za-z0-9_])(" + "|".join(re.escape(a) for a in sorted(real, key=len, reverse=True))
                              + r")(?![0-9])")
         return pattern.sub(lambda m: real[m.group(1)], str(text))
+
+    # Valores "ambiguos": no se sustituyen a ciegas porque pueden ser una cifra corriente y no el identificador.
+    _MIN_SAFE_LEN = 4          # más corto, o solo dígitos: ambiguo
+    _SHIFT_MIN_FLOOR = 10**5   # una columna desplazada solo se vigila si sus valores reales tienen 6+ dígitos
+
+    def alias_text(self, text: str, literal=()) -> TextResult:
+        """Texto del analista -> lo que puede ver el modelo: cada valor real conocido pasa a su alias (inversa de `reveal_any`).
+
+        * Coincidencia exacta (distingue mayúsculas) y con límites de palabra: `10.1.0.1` no se toca dentro de `10.1.0.10`.
+        * Valores ambiguos (solo dígitos o de menos de 4 caracteres) y números largos que caerían en el rango real de una
+          columna desplazada (p. ej. un id de factura): NO se sustituyen; se lanza `AmbiguousText` con la pista del alias.
+        * `literal`: textos que el analista confirma como cifras corrientes; se dejan tal cual (queda el recuento).
+        Solo local. El resultado no contiene valores reales salvo los de `literal`.
+        """
+        text = str(text)
+        literal = {str(x) for x in literal}
+        hits, ambiguous, used = [], {}, 0
+        word = "A-Za-z0-9_"
+        for col, mapping in self._to_alias.items():
+            for real, alias in mapping.items():
+                if not real or real not in text:  # filtro barato antes de la expresión regular
+                    continue
+                for m in re.finditer(rf"(?<![{word}]){re.escape(real)}(?![{word}])", text):
+                    if real in literal:
+                        used += 1
+                    elif len(real) < self._MIN_SAFE_LEN or real.isdigit():
+                        ambiguous.setdefault(real, {"token": real, "column": col, "hint": f"su alias es {alias}"})
+                    else:
+                        hits.append((m.start(), m.end(), col, alias))
+        for col, low in self._shift.items():
+            if low < self._SHIFT_MIN_FLOOR:
+                continue
+            for m in re.finditer(r"(?<![\w.])\d{6,}(?!\w)", text):
+                token = m.group()
+                if int(token) < low:
+                    continue
+                if token in literal:
+                    used += 1
+                    continue
+                seen = int(token) - low
+                ambiguous.setdefault(token, {"token": token, "column": col, "hint": f"el modelo lo ve como {seen:d}"
+                                             if float(seen).is_integer() else f"el modelo lo ve como {seen}"})
+        if ambiguous:
+            raise AmbiguousText(ambiguous.values())
+        hits.sort(key=lambda h: (h[0], -(h[1] - h[0])))  # de izquierda a derecha; ante solape, el más largo
+        out, pos, counts = [], 0, {}
+        for start, end, col, alias in hits:
+            if start < pos:
+                continue
+            out += [text[pos:start], alias]
+            pos = end
+            counts[(col, alias)] = counts.get((col, alias), 0) + 1
+        out.append(text[pos:])
+        subs = tuple({"column": c, "alias": a, "count": n} for (c, a), n in sorted(counts.items()))
+        return TextResult("".join(out), subs, used)

@@ -10,7 +10,7 @@ mensajes añadidos al final, nunca modificando lo anterior.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Annotated, Literal, TypedDict
 
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, SystemMessage, ToolMessage
@@ -22,7 +22,7 @@ from langgraph.types import Command, interrupt
 from pydantic import BaseModel, Field, ValidationError
 
 from dfir_copilot.agent.hypotheses import DecisionRequest, HypothesisBook, HypothesisError
-from dfir_copilot.privacy import PrivacyError, privacy_context
+from dfir_copilot.privacy import PrivacyError, Pseudonymizer, TextResult, privacy_context
 from dfir_copilot.tools import Toolkit, ToolLimits
 from dfir_copilot.tools.sanitize import clean_text, render, sanitize
 
@@ -109,6 +109,8 @@ class AgentResult:
     steps: int = 0
     tokens: int = 0
     thread_id: str = "default"
+    sent: str | None = None          # lo que TÚ escribiste y se envió al modelo, ya traducido a alias (sin valores reales)
+    substitutions: tuple = ()        # ({"column", "alias", "count"}, …): qué se tradujo; nunca el valor real
 
 
 class AgentBusy(Exception):
@@ -121,10 +123,14 @@ class AgentCrashed(Exception):
 
 class DfirAgent:
     def __init__(self, engine, ledger, llm, *, analyst: str | None = None, max_steps: int = 12,
-                 limits: ToolLimits = ToolLimits(), allow_real: bool = False):
+                 limits: ToolLimits = ToolLimits(), allow_real: bool = False,
+                 pseudonymizer: Pseudonymizer | None = None):
         """`engine`: el motor sobre la COPIA SEUDONIMIZADA (`engine, ps = ws.pseudonymized()`); lo que devuelven sus herramientas
         viaja a un LLM externo. Con datos reales se rechaza salvo `allow_real=True` (datos sintéticos o no sensibles): queda
-        constancia en el ledger, cada turno lleva la copia sobre la que corrió."""
+        constancia en el ledger, cada turno lleva la copia sobre la que corrió.
+
+        Con la copia, lo que escribes (preguntas y notas) pasa por el diccionario local: los valores reales se traducen a
+        alias antes de llegar al modelo. `pseudonymizer` reutiliza el que ya cargaste; si no, se abre el de la copia."""
         if getattr(engine, "copy_kind", "real") == "real" and not allow_real:
             raise PrivacyError("El agente envía a un LLM externo lo que devuelven sus herramientas y este motor consulta los datos "
                                "REALES. Usa la copia seudonimizada: `engine, ps = ws.pseudonymized()`. Si los datos son sintéticos "
@@ -132,6 +138,7 @@ class DfirAgent:
         self.engine, self.ledger, self.llm, self.max_steps = engine, ledger, llm, max_steps
         self.toolkit = Toolkit(engine, ledger, limits)
         self.toolkit.register_copy()  # falla ya, al construir, si la copia no es la del caso
+        self._guard = (pseudonymizer or Pseudonymizer(engine.manifest)) if engine.copy_kind == "pseudonymized" else None
         self.book = HypothesisBook(ledger)
         opened = ledger.entries("case_opened")
         self.analyst = analyst or (opened[0]["data"].get("analyst") if opened else None) or "analista"
@@ -335,18 +342,25 @@ class DfirAgent:
             return "idle"
         return "awaiting_approval" if self.pending(thread_id) else "crashed"
 
-    def _run(self, payload, thread_id: str, question: str | None) -> AgentResult:
+    def _run(self, payload, thread_id: str, question: str | None, extra: dict | None = None) -> AgentResult:
         try:
             self.graph.invoke(payload, self._config(thread_id))
         except Exception as exc:  # noqa: BLE001 - se audita y se vuelve a lanzar
             self.ledger.append("agent_turn", {
                 "thread_id": thread_id, "question": question, "status": "error", "answer": None,
                 "model": self.model_name, "copy": self.engine.copy_id, "steps": None, "tokens": None, "approvals": [],
-                "error": clean_text(f"{type(exc).__name__}: {exc}", 400)})
+                "error": clean_text(f"{type(exc).__name__}: {exc}", 400), **(extra or {})})
             raise
-        return self._result(thread_id, question)
+        return self._result(thread_id, question, extra)
 
-    def ask(self, question: str, thread_id: str = "default") -> AgentResult:
+    def preview(self, text: str, literal=()) -> TextResult:
+        """Qué recibiría el modelo si escribes `text`, sin llamarlo (no gasta API). Lanza `AmbiguousText` si hay algo dudoso."""
+        if self._guard is None:  # datos reales permitidos: no hay copia ni diccionario, el texto va tal cual
+            return TextResult(str(text))
+        return self._guard.alias_text(text, literal)
+
+    def ask(self, question: str, thread_id: str = "default", literal=()) -> AgentResult:
+        """`literal`: textos que confirmas como cifras corrientes (no identificadores) y se dejan como los escribiste."""
         if not question or not question.strip():
             raise ValueError("La pregunta no puede estar vacía")
         phase = self._phase(thread_id)
@@ -355,21 +369,38 @@ class DfirAgent:
         if phase == "crashed":
             raise AgentCrashed("El hilo quedó a medias por un error anterior: llama a reset() y vuelve a preguntar "
                                "(el ledger conserva todo lo hecho)")
-        question = question.strip()
-        first = HumanMessage(f"{self.briefing()}\n\nPREGUNTA DEL ANALISTA:\n{question}")
-        return self._run({"messages": [first], "steps": 0, "tokens": 0, "pending": []}, thread_id, question)
+        clean = self.preview(question.strip(), literal)  # antes de nada: si es ambiguo no se envía ni se registra
+        first = HumanMessage(f"{self.briefing()}\n\nPREGUNTA DEL ANALISTA:\n{clean.text}")
+        result = self._run({"messages": [first], "steps": 0, "tokens": 0, "pending": []}, thread_id, clean.text,
+                           self._audit_text(clean))
+        return replace(result, sent=clean.text, substitutions=clean.substitutions)
 
-    def resume(self, decisions: list[dict], thread_id: str = "default") -> AgentResult:
-        """decisions: [{"hypothesis_id": "h-…", "decision": "approve"|"reject", "note": "…"}]"""
+    def _audit_text(self, *cleaned: TextResult) -> dict:
+        """Recuento para el ledger (solo con copia): cuántos valores se tradujeron y cuántos se dejaron literales."""
+        if self._guard is None:
+            return {}
+        return {"text_substitutions": sum(c["count"] for r in cleaned for c in r.substitutions),
+                "text_literal": sum(r.literal_used for r in cleaned)}
+
+    def resume(self, decisions: list[dict], thread_id: str = "default", literal=()) -> AgentResult:
+        """decisions: [{"hypothesis_id": "h-…", "decision": "approve"|"reject", "note": "…"}]
+
+        Las notas se traducen a alias antes de llegar al modelo y al registro de la decisión. Si alguna es ambigua se lanza
+        `AmbiguousText` ANTES de reanudar: la aprobación sigue pendiente y puedes reescribir la nota."""
         if not self.pending(thread_id):
             raise ValueError("No hay ninguna aprobación pendiente en este hilo")
-        return self._run(Command(resume=decisions), thread_id, None)
+        cleaned = [self.preview(d.get("note") or "", literal) for d in decisions]
+        decisions = [{**d, "note": c.text} for d, c in zip(decisions, cleaned, strict=True)]
+        sent = " | ".join(c.text for c in cleaned if c.text) or None
+        result = self._run(Command(resume=decisions), thread_id, None, self._audit_text(*cleaned))
+        return replace(result, sent=sent, substitutions=tuple(x for c in cleaned for x in c.substitutions))
 
-    def resolve(self, decision: Literal["approve", "reject"], note: str = "", thread_id: str = "default") -> AgentResult:
+    def resolve(self, decision: Literal["approve", "reject"], note: str = "", thread_id: str = "default",
+                literal=()) -> AgentResult:
         """Atajo: aplica la misma decisión a todas las aprobaciones pendientes."""
         pending = self.pending(thread_id)
         return self.resume([{"hypothesis_id": r["hypothesis_id"], "decision": decision, "note": note} for r in pending],
-                           thread_id)
+                           thread_id, literal)
 
     def reset(self, thread_id: str = "default") -> None:
         """Descarta la conversación de un hilo (no toca el ledger ni las hipótesis)."""
@@ -380,7 +411,7 @@ class DfirAgent:
         found = [i.value for t in snap.tasks for i in getattr(t, "interrupts", ())]
         return found[0]["requests"] if found else []
 
-    def _result(self, thread_id: str, question: str | None) -> AgentResult:
+    def _result(self, thread_id: str, question: str | None, extra: dict | None = None) -> AgentResult:
         snap = self._snapshot(thread_id)
         values = snap.values
         approvals = self.pending(thread_id)
@@ -397,7 +428,7 @@ class DfirAgent:
         self.ledger.append("agent_turn", {
             "thread_id": thread_id, "question": question, "status": status, "answer": answer, "model": self.model_name,
             "copy": self.engine.copy_id, "steps": result.steps, "tokens": result.tokens, "stop_reason": stop,
-            "approvals": [a["hypothesis_id"] for a in approvals]})
+            "approvals": [a["hypothesis_id"] for a in approvals], **(extra or {})})
         return result
 
 
