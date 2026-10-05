@@ -152,7 +152,8 @@ r.substitutions   # ({"column": "src_ip", "alias": "IP-0042", "count": 1},) — 
   (`66.6.6. 1`). El diccionario solo conoce lo que está en el dataset.
 * **Números desplazados escritos con otro sentido.** Un número de 6+ dígitos por encima del mínimo real de una columna desplazada se
   trata como posible id y se bloquea hasta que lo confirmes con `literal` o lo escribas como lo ve el modelo.
-* **`ledger.note()`** (notas tuyas al ledger) no pasa por el modelo y no se traduce; lo que escribas ahí se queda como lo escribas.
+* **`ledger.note()` directo** no se traduce y el agente no lo muestra al modelo (solo cuenta cuántas hay). Para que una nota llegue al
+  modelo, escríbela con `agent.note()`, que la traduce a alias y la sella con la copia.
 * `CaseWorkspace.verify()` aún no comprueba la copia (hash del Parquet seudonimizado y del diccionario frente a la entrada
   `data_copy`); hoy lo comprueban `QueryEngine` y `Pseudonymizer` al abrirlos.
 * Con `resource` inferido como `endpoint` (log sin identificador de recurso), el recurso queda enmascarado a `{id}` y la

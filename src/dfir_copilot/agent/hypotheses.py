@@ -5,8 +5,9 @@ import hashlib
 import re
 from dataclasses import dataclass
 
-STATUSES = ("propuesta", "en_prueba", "confirmada", "refutada")
-FINAL = ("confirmada", "refutada")
+STATUSES = ("propuesta", "en_prueba", "confirmada", "refutada", "retirada")
+FINAL = ("confirmada", "refutada")   # decisiones del analista sobre la evidencia
+CLOSED = (*FINAL, "retirada")        # ya no admiten pruebas ni peticiones; "retirada" = el analista la descarta o la reemplaza
 
 
 class HypothesisError(Exception):
@@ -54,6 +55,8 @@ class HypothesisBook:
         item["history"].append({k: update.get(k) for k in ("from", "to", "decision", "decided_by", "note")})
         if update["decision"] in ("auto", "approved"):
             item["status"] = update["to"]
+            if update.get("superseded_by"):
+                item["superseded_by"] = update["superseded_by"]
             if update.get("refutation_checks"):
                 item["refutation_checks"] = list(update["refutation_checks"])
             item["evidence_refs"] = sorted(set(item["evidence_refs"]) | set(update.get("evidence_refs", [])))
@@ -92,7 +95,7 @@ class HypothesisBook:
 
     def start_testing(self, hid: str) -> dict:
         item = self.get(hid)
-        if item["status"] in FINAL:
+        if item["status"] in CLOSED:
             raise HypothesisError(f"{hid} ya está {item['status']}; no se reabre")
         if item["status"] == "en_prueba":
             return item
@@ -155,7 +158,7 @@ class HypothesisBook:
 
     def decide(self, request: DecisionRequest, approve: bool, analyst: str, note: str = "") -> dict:
         item = self.get(request.hypothesis_id)
-        if item["status"] in FINAL:
+        if item["status"] in CLOSED:
             raise HypothesisError(f"{request.hypothesis_id} ya está {item['status']}")
         update = {"hypothesis_id": request.hypothesis_id, "from": item["status"],
                   "to": request.to if approve else item["status"], "requested_by": "agent",
@@ -163,6 +166,31 @@ class HypothesisBook:
                   "rationale": request.rationale, "note": note, "evidence_refs": list(request.evidence_refs)}
         if request.refutation_checks:
             update["refutation_checks"] = [dict(c) for c in request.refutation_checks]
+        self.ledger.append("hypothesis_update", update)
+        self._apply(item, update)
+        return item
+
+    def retire(self, hid: str, analyst: str, reason: str, superseded_by: str | None = None) -> dict:
+        """El analista descarta una hipótesis (duplicada, reemplazada por otra mejor formulada, fuera de alcance).
+
+        No es una decisión sobre la evidencia: una hipótesis ya confirmada o refutada no se retira, y la retirada tampoco se
+        revierte. Queda en el ledger con quién, por qué y, si la hay, qué hipótesis la reemplaza."""
+        item = self.get(hid)
+        if item["status"] == "retirada":
+            return item
+        if item["status"] in FINAL:
+            raise HypothesisError(f"{hid} ya está {item['status']} por decisión sobre la evidencia; no se retira")
+        if not reason or not reason.strip():
+            raise HypothesisError("Falta el motivo de la retirada")
+        if superseded_by is not None:
+            if superseded_by == hid:
+                raise HypothesisError("Una hipótesis no puede reemplazarse a sí misma")
+            self.get(superseded_by)  # debe existir
+        update = {"hypothesis_id": hid, "from": item["status"], "to": "retirada", "requested_by": "analyst",
+                  "decided_by": analyst, "decision": "approved", "rationale": reason.strip(), "note": reason.strip(),
+                  "evidence_refs": []}
+        if superseded_by:
+            update["superseded_by"] = superseded_by
         self.ledger.append("hypothesis_update", update)
         self._apply(item, update)
         return item

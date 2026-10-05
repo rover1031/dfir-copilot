@@ -123,9 +123,24 @@ de parámetros pueden ser descriptivos. Ambos son metadatos de esquema, no regis
 | Fase | Contenido | Estado |
 |---|---|---|
 | **P0** | Generalización e integridad: perfilado local multi-formato y mapeo bilingüe (A), espacio por caso, integridad ledger/dataset, huella de resultados y roles (B2), Inspector e ingestor multi-formato (B1) | Hecho (§12, §13) |
-| **P1** | Agente. **Fase LLM**: una llamada que recibe solo el Data Profile y devuelve clasificación del log, confirmación del mapeo y consultas SQL propuestas (validadas con pydantic y ejecutadas en el motor seguro). Prompts bilingües que respetan el prefijo estable. Notas del analista visibles en cada pregunta, regla de falsabilidad, tope de tokens por pregunta, conversación persistente en disco | Pendiente |
-| **P2** | Entrega: reporte Markdown bilingüe generado desde el ledger, README, CLI (`dfir ingest`, `dfir ask`) | Pendiente |
+| **P1-a** | Fase LLM: una llamada que recibe solo el Data Profile y devuelve clasificación del log, confirmación del mapeo y consultas SQL propuestas (validadas con pydantic y ejecutadas en el motor seguro); zona horaria declarada por caso | Hecho |
+| **P1-b** | Agente. b.1 filtro de notebooks, perfilado canónico y resumen por rol · b.2 copia seudonimizada (`priv-1`) y agente, toolkit, ledger y replay sobre ella (`privacidad.md`) · b.3a texto del analista traducido a alias · b.3b falsabilidad (`falsabilidad.md`) · b.3c tope de tokens por pregunta y por caso, notas del analista visibles en cada pregunta, retirar hipótesis (`presupuesto_y_notas.md`) | Hecho |
+| **P1-c** | Conversación persistente en disco: hoy el hilo del agente vive en memoria y se pierde al reiniciar el kernel (las hipótesis, las notas, el presupuesto y el ledger sí persisten). Prompts bilingües que respetan el prefijo estable | Pendiente |
+| **P2** | Entrega: reporte Markdown bilingüe generado desde el ledger (el formato y la estructura se acuerdan antes de generarlo), README, CLI (`dfir ingest`, `dfir ask`). `nbstripout`: resuelto con `tools/strip_notebook_outputs.py` | Pendiente |
 | **P3** | Ampliación: logs no web (autenticación, EDR, firewall) con esquema canónico propio, Excel, GeoIP offline, inteligencia en PDF | Pendiente |
+
+**Transversal (fuera de P1–P3)**
+
+| Tema | Prioridad | Estado |
+|---|---|---|
+| Política de exposición de datos y seudonimización hacia el LLM | Alta | Hecho (P1-b.2/b.3a). Falta la aprobación de seguridad y legal de la política (Ley 1581 de 2012 si hay datos personales hacia un proveedor externo) |
+| Evaluación y métricas: casos con respuesta conocida, precisión y recall de detectores, tokens por investigación, tiempo hasta el triaje frente a la línea base manual | Alta | Pendiente (los datos ya salen del ledger) |
+| Esquema canónico para EDR y autenticación (ECS u OCSF en lugar de ampliar los 13 campos web) | Alta | Pendiente; afecta a P1 y se ejecuta en P3 |
+| Detectores genéricos (primera vez visto, cambios de ritmo, valores raros, MITRE) y líneas de tiempo multi-fuente | Media-alta | Pendiente |
+| Integridad forense más allá de la cadena de hashes: anclar el `head_hash` fuera de la máquina, copias fuera de WSL, plantilla de cadena de custodia, redacción de credenciales en reportes | Media | Pendiente |
+| Ingeniería de entrega: repositorio remoto, CI (`ruff` y `pytest`), lockfile, pre-commit, contenedor sin root, versionado y ADR | Media | Pendiente (repositorio remoto en manos del analista) |
+| Integración con el ecosistema: ingesta desde Falcon NG-SIEM/LogScale, salida como consultas de LogScale o reglas Sigma, exportar el ledger al gestor de casos | Media | Pendiente |
+| Después: multi-analista, interfaz web (Django y HTMX), modelo local para datos que no puedan salir | Baja | Pendiente |
 
 La fase LLM es P1, no P0: P0 termina en el perfil, el mapeo y el borrador de mapping, que ya es lo que se enviaría al modelo.
 

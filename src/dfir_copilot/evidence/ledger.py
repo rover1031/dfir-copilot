@@ -345,8 +345,12 @@ class Ledger:
             new += 1
         return new
 
-    def note(self, text: str, refs=(), status: str | None = None, analyst: str | None = None) -> dict:
-        """Decisión o comentario del analista, enlazado a consultas, hallazgos o casos existentes."""
+    def note(self, text: str, refs=(), status: str | None = None, analyst: str | None = None,
+             copy: str | None = None) -> dict:
+        """Decisión o comentario del analista, enlazado a consultas, hallazgos o casos existentes.
+
+        `copy`: copia de datos sobre la que se escribió (`engine.copy_id`). El agente solo muestra al modelo las notas escritas
+        por su propio camino (`DfirAgent.note`, ya traducidas a alias) sobre la copia que está consultando."""
         if not text or not text.strip():
             raise ValueError("La nota no puede estar vacía")
         if status not in NOTE_STATUSES:
@@ -355,8 +359,10 @@ class Ledger:
         unknown = [r for r in refs if r not in known]
         if unknown:
             raise KeyError(f"Referencias desconocidas: {unknown}")
-        return self.append("note", {"text": text.strip(), "refs": list(refs), "status": status,
-                                    "analyst": analyst})
+        data = {"text": text.strip(), "refs": list(refs), "status": status, "analyst": analyst}
+        if copy:
+            data["copy"] = copy
+        return self.append("note", data)
 
     # --- lectura y verificación ----------------------------------------------------------
     def known_refs(self) -> set[str]:
@@ -391,6 +397,8 @@ class Ledger:
         copia, porque `U-0003` no existe en los datos reales. Las consultas sin sello (anteriores a P1-b.2b) corrieron sobre los
         datos reales. Si falta el motor de alguna copia, esas consultas NO se verifican: salen con `skipped=True` y `match=False`
         (no verificada no es lo mismo que alterada, por eso no cuentan como `mismatches` en la entrada del ledger).
+        Una consulta `DESCRIBE` que ya no coincide sale con `schema_drift=True`: lo que cambió es el esquema de la vista (p. ej. la
+        columna derivada `timestamp_local` al declarar la zona), no los datos; va aparte, en `schema_drift`.
 
         Las re-ejecuciones son verificaciones, no análisis nuevo: no se añaden al historial del motor y el
         resultado queda como UNA entrada `replay` en el ledger (en vez de duplicar cada consulta).
@@ -427,8 +435,11 @@ class Ledger:
                 # Con truncamiento, un LIMIT sin ORDER BY puede elegir otras filas: solo se compara el recuento.
                 comparable = recorded_hash is not None and not d.get("truncated") and not res.truncated
                 hash_match = (target.history[-1]["result_sha256"] == recorded_hash) if comparable else None
-                results.append({**base, "replayed_rows": rows, "hash_match": hash_match,
-                                "match": rows == d["rows"] and hash_match is not False})
+                match = rows == d["rows"] and hash_match is not False
+                row = {**base, "replayed_rows": rows, "hash_match": hash_match, "match": match}
+                if not match and d["sql"].lstrip().upper().startswith("DESCRIBE"):
+                    row["schema_drift"] = True  # el esquema de la vista cambió (p. ej. timestamp_local); los datos no
+                results.append(row)
             except Exception as exc:  # noqa: BLE001 - se reporta, no se oculta
                 results.append({**base, "replayed_rows": None, "hash_match": None, "match": False,
                                 "error": f"{type(exc).__name__}: {exc}"})
@@ -441,8 +452,10 @@ class Ledger:
                 c["queries"] += 1
                 c["matches"] += bool(r["match"])
             self.append("replay", {"queries": len(results), "matches": sum(r["match"] for r in results),
-                                   "mismatches": [r["query_id"] for r in results if not r["match"] and not r.get("skipped")],
+                                   "mismatches": [r["query_id"] for r in results
+                                                  if not r["match"] and not r.get("skipped") and not r.get("schema_drift")],
                                    "skipped": [r["query_id"] for r in results if r.get("skipped")],
+                                   "schema_drift": [r["query_id"] for r in results if r.get("schema_drift")],
                                    "by_copy": by,
                                    "hash_checked": sum(r["hash_match"] is not None for r in results),
                                    "hash_mismatches": [r["query_id"] for r in results if r["hash_match"] is False]})

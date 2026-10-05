@@ -38,7 +38,8 @@ def privacy_context(manifest: dict) -> str:
         shown = aliased + [f"{c}→{prefix(c)}-0001…" for c in ips]
         lines.append("- Alias estables, numerados por orden de primera aparición: " + ", ".join(shown) + ". Agrupan, cuentan y "
                      "cruzan igual que los valores reales. No intentes deducir el valor real; repórtalos con su alias (el "
-                     "analista los revela en local).")
+                     "analista los revela en local). Enumera los alias uno a uno: no los abrevies con rangos como "
+                     "'U-0032 a U-0035', porque al revelarlos se leería como un rango de valores reales y no lo es.")
     for c in ips:
         lines.append(f"- {c}_scope (public, private, loopback, link_local, shared, reserved, invalid) y {c}_net (alias de la "
                      f"/24 o /64) conservan la señal de red. Para clasificar direcciones usa esas columnas: un patrón como "
