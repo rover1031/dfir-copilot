@@ -1,0 +1,177 @@
+# Diccionario bilingüe (inglés/español) de alias de campos -> nombre canónico.
+# Se puede ampliar SIN tocar código. Los alias se normalizan antes de comparar: minúsculas, sin acentos,
+# camelCase -> snake_case y cualquier separador -> "_" ("Dirección IP" == "direccion_ip", "sourceIPAddress" ==
+# "source_ip_address", "@timestamp" == "timestamp", "source.ip" == "source_ip").
+#
+#   domain:        common | network | web | dns | endpoint  (sirve para clasificar el tipo de log)
+#   semantics:     tipos semánticos esperados en los valores (confirman o desmienten un alias)
+#   aliases:       coincidencia fuerte (puntuación 1.0)
+#   weak_aliases:  nombres genéricos que pueden significar otra cosa (puntuación 0.7)
+
+timestamp:
+  domain: common
+  description: {es: Instante del evento, en: Event time}
+  semantics: [timestamp]
+  aliases: [timestamp, "@timestamp", ts, _time, datetime, date_time, event_time, eventtime, time_local, time_generated,
+            created_at, creation_time, log_time, utc_time, event_timestamp, time_created,
+            fecha_hora, fecha_evento, marca_tiempo, marca_de_tiempo, fecha_registro, hora_evento, fecha_y_hora]
+  weak_aliases: [time, date, fecha, hora, tiempo]
+
+src_ip:
+  domain: network
+  description: {es: IP de origen, en: Source IP}
+  semantics: [ipv4, ipv6]
+  aliases: [src_ip, source_ip, source_address, src_addr, client_ip, clientip, remote_addr, remote_ip, c_ip, caller_ip,
+            source_ip_address, ip_address, local_address_ip4, ip_src, sourceip, client_address, x_forwarded_for,
+            ip_origen, direccion_ip, direccion_ip_origen, ip_cliente, origen_ip, ip_de_origen, ip_fuente]
+  weak_aliases: [ip, ip_addr, address, direccion, origen]
+
+dst_ip:
+  domain: network
+  description: {es: IP de destino, en: Destination IP}
+  semantics: [ipv4, ipv6]
+  aliases: [dst_ip, dest_ip, destination_ip, destination_address, dst_addr, server_ip, s_ip, remote_address_ip4,
+            target_ip, ip_dst, ip_destino, direccion_ip_destino, ip_servidor, ip_de_destino]
+  weak_aliases: [destino]
+
+src_port:
+  domain: network
+  description: {es: Puerto de origen, en: Source port}
+  aliases: [src_port, source_port, sport, client_port, local_port, puerto_origen, puerto_de_origen]
+
+dst_port:
+  domain: network
+  description: {es: Puerto de destino, en: Destination port}
+  aliases: [dst_port, dest_port, destination_port, dport, server_port, remote_port, s_port, puerto_destino,
+            puerto_de_destino]
+  weak_aliases: [port, puerto]
+
+protocol:
+  domain: network
+  description: {es: Protocolo, en: Protocol}
+  aliases: [protocol, proto, network_protocol, network_transport, ip_protocol, protocolo]
+
+action:
+  domain: common
+  description: {es: Acción o resultado, en: Action or outcome}
+  aliases: [action, event_action, outcome, event_outcome, result, disposition, verdict, decision,
+            accion, resultado, decision_tomada, veredicto]
+  weak_aliases: [status_text, estado_accion]
+
+user_id:
+  domain: common
+  description: {es: Identidad del actor, en: Actor identity}
+  aliases: [user_id, user, username, user_name, userid, account, account_name, principal, user_principal_name, upn,
+            subject_user_name, target_user_name, user_identity_arn, cs_username, login, uid,
+            usuario, nombre_usuario, nombre_de_usuario, id_usuario, cuenta, cuenta_usuario, login_usuario]
+  weak_aliases: [actor, name, nombre]
+
+session_id:
+  domain: common
+  description: {es: Identificador de sesión, en: Session identifier}
+  aliases: [session_id, session, sessionid, sid_session, jsessionid, phpsessid, id_sesion, sesion]
+
+host:
+  domain: common
+  description: {es: Equipo o host, en: Host}
+  semantics: [domain]
+  aliases: [host, hostname, host_name, http_host, computer, computer_name, device_name, machine, server_name,
+            cs_host, nombre_equipo, equipo, nombre_host, servidor, dispositivo, maquina]
+
+http_method:
+  domain: web
+  description: {es: Método HTTP, en: HTTP method}
+  semantics: [http_method]
+  aliases: [http_method, method, request_method, http_request_method, cs_method, verb, metodo, metodo_http]
+
+uri:
+  domain: web
+  description: {es: URL o ruta solicitada, en: Requested URL or path}
+  semantics: [uri_path, url, http_request_line]
+  aliases: [uri, url, http_uri, request_uri, url_original, url_full, cs_uri, cs_uri_stem, request, request_url,
+            full_url, ruta, url_solicitada, ruta_solicitada, recurso, peticion, solicitud]
+  weak_aliases: [path, link, enlace]
+
+status_code:
+  domain: web
+  description: {es: Código de respuesta HTTP, en: HTTP status code}
+  semantics: [http_status]
+  aliases: [status_code, http_status, http_status_code, response_code, http_response_status_code, sc_status,
+            status_http, codigo_estado, codigo_respuesta, codigo_http, estado_http]
+  weak_aliases: [status, estado, codigo, code]
+
+user_agent:
+  domain: web
+  description: {es: Agente de usuario, en: User agent}
+  semantics: [user_agent]
+  aliases: [user_agent, useragent, http_user_agent, user_agent_original, cs_user_agent, ua,
+            agente_usuario, agente_de_usuario, navegador, agente]
+
+referer:
+  domain: web
+  description: {es: Página de referencia, en: Referrer}
+  semantics: [url, uri_path, domain]
+  aliases: [referer, referrer, http_referer, http_referrer, cs_referer, referencia, pagina_referencia, referente]
+
+bytes_out:
+  domain: network
+  description: {es: Bytes enviados, en: Bytes sent}
+  aliases: [bytes_out, bytes_sent, body_bytes_sent, sc_bytes, response_size, response_bytes, out_bytes, sent_bytes,
+            bytes_enviados, tamano_respuesta, bytes_salida]
+  weak_aliases: [bytes, size, tamano]
+
+bytes_in:
+  domain: network
+  description: {es: Bytes recibidos, en: Bytes received}
+  aliases: [bytes_in, bytes_received, cs_bytes, request_size, in_bytes, received_bytes, bytes_recibidos, bytes_entrada]
+
+dns_query:
+  domain: dns
+  description: {es: Nombre consultado en DNS, en: DNS query name}
+  semantics: [domain]
+  aliases: [dns_query, query_name, qname, dns_question_name, question_name, domain_name, consulta_dns, dominio_consultado]
+  weak_aliases: [query, dominio, domain]
+
+event_type:
+  domain: common
+  description: {es: Tipo de evento, en: Event type}
+  aliases: [event_type, event_name, eventname, event_id, eventid, event_simple_name, event_code, event_category,
+            category, tipo_evento, tipo_de_evento, nombre_evento, id_evento, evento]
+  weak_aliases: [type, tipo, event]
+
+process_name:
+  domain: endpoint
+  description: {es: Proceso, en: Process}
+  aliases: [process_name, process, image, image_file_name, process_executable, executable, file_name_process,
+            new_process_name, proceso, nombre_proceso, ejecutable, imagen]
+
+command_line:
+  domain: endpoint
+  description: {es: Línea de comandos, en: Command line}
+  aliases: [command_line, commandline, cmdline, cmd_line, process_command_line, process_args, linea_comandos,
+            linea_de_comandos, comando]
+
+parent_process:
+  domain: endpoint
+  description: {es: Proceso padre, en: Parent process}
+  aliases: [parent_process, parent_image, parent_process_name, process_parent_name, parent_base_file_name,
+            parent_name, proceso_padre, padre]
+
+process_id:
+  domain: endpoint
+  description: {es: Identificador de proceso, en: Process id}
+  aliases: [process_id, pid, process_pid, target_process_id, id_proceso]
+
+file_path:
+  domain: endpoint
+  description: {es: Ruta de archivo, en: File path}
+  semantics: [windows_path]
+  aliases: [file_path, target_filename, target_file_name, file_name, filename, full_path, file_target_path,
+            ruta_archivo, archivo, nombre_archivo, ruta_fichero]
+
+file_hash:
+  domain: endpoint
+  description: {es: Hash de archivo, en: File hash}
+  semantics: [md5, sha1, sha256]
+  aliases: [file_hash, hash, hashes, sha256, sha1, md5, sha256_hash_data, md5_hash_data, process_hash_sha256,
+            file_hash_sha256, hash_sha256, hash_archivo, huella]

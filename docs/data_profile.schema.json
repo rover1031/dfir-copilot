@@ -1,0 +1,616 @@
+{
+  "$defs": {
+    "Dataset": {
+      "additionalProperties": false,
+      "properties": {
+        "row_count": {
+          "title": "Row Count",
+          "type": "integer"
+        },
+        "field_count": {
+          "title": "Field Count",
+          "type": "integer"
+        },
+        "profiled_fields": {
+          "title": "Profiled Fields",
+          "type": "integer"
+        },
+        "sample_rows": {
+          "title": "Sample Rows",
+          "type": "integer"
+        },
+        "nested": {
+          "title": "Nested",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "row_count",
+        "field_count",
+        "profiled_fields",
+        "sample_rows",
+        "nested"
+      ],
+      "title": "Dataset",
+      "type": "object"
+    },
+    "FieldProfile": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "type": {
+          "title": "Type",
+          "type": "string"
+        },
+        "null_pct": {
+          "title": "Null Pct",
+          "type": "number"
+        },
+        "distinct_approx": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Distinct Approx"
+        },
+        "length": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Length"
+        },
+        "numeric_pct": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Numeric Pct"
+        },
+        "semantics": {
+          "items": {
+            "$ref": "#/$defs/Ratio"
+          },
+          "title": "Semantics",
+          "type": "array"
+        },
+        "shapes": {
+          "items": {
+            "$ref": "#/$defs/Ratio"
+          },
+          "title": "Shapes",
+          "type": "array"
+        },
+        "url_param_keys": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Url Param Keys",
+          "type": "array"
+        },
+        "enum_values": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Enum Values"
+        },
+        "pii": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Pii",
+          "type": "array"
+        },
+        "secret_in_values_pct": {
+          "default": 0.0,
+          "title": "Secret In Values Pct",
+          "type": "number"
+        },
+        "timestamp_format": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timestamp Format"
+        },
+        "timestamp_pct": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timestamp Pct"
+        },
+        "mapped_to": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mapped To"
+        },
+        "mapping_score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mapping Score"
+        }
+      },
+      "required": [
+        "path",
+        "type",
+        "null_pct"
+      ],
+      "title": "FieldProfile",
+      "type": "object"
+    },
+    "LogTypeHint": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "title": "Type",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "score": {
+          "title": "Score",
+          "type": "number"
+        },
+        "evidence": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence",
+          "type": "array"
+        }
+      },
+      "required": [
+        "type",
+        "label",
+        "score",
+        "evidence"
+      ],
+      "title": "LogTypeHint",
+      "type": "object"
+    },
+    "MappingEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "canonical": {
+          "title": "Canonical",
+          "type": "string"
+        },
+        "field": {
+          "title": "Field",
+          "type": "string"
+        },
+        "score": {
+          "title": "Score",
+          "type": "number"
+        },
+        "method": {
+          "title": "Method",
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence",
+          "type": "array"
+        }
+      },
+      "required": [
+        "canonical",
+        "field",
+        "score",
+        "method",
+        "evidence"
+      ],
+      "title": "MappingEntry",
+      "type": "object"
+    },
+    "Privacy": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "const": "strict",
+          "default": "strict",
+          "title": "Mode",
+          "type": "string"
+        },
+        "raw_values_included": {
+          "const": false,
+          "default": false,
+          "title": "Raw Values Included",
+          "type": "boolean"
+        },
+        "notes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Notes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "notes"
+      ],
+      "title": "Privacy",
+      "type": "object"
+    },
+    "Ratio": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "pct": {
+          "title": "Pct",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "pct"
+      ],
+      "title": "Ratio",
+      "type": "object"
+    },
+    "Source": {
+      "additionalProperties": false,
+      "properties": {
+        "file_name": {
+          "title": "File Name",
+          "type": "string"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Sha256"
+        },
+        "size_bytes": {
+          "title": "Size Bytes",
+          "type": "integer"
+        },
+        "format": {
+          "enum": [
+            "csv",
+            "tsv",
+            "json",
+            "parquet"
+          ],
+          "title": "Format",
+          "type": "string"
+        },
+        "compression": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Compression"
+        },
+        "encoding": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Encoding"
+        },
+        "delimiter": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Delimiter"
+        },
+        "has_header": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Has Header"
+        }
+      },
+      "required": [
+        "file_name",
+        "sha256",
+        "size_bytes",
+        "format"
+      ],
+      "title": "Source",
+      "type": "object"
+    },
+    "TimestampCandidate": {
+      "additionalProperties": false,
+      "properties": {
+        "field": {
+          "title": "Field",
+          "type": "string"
+        },
+        "format": {
+          "title": "Format",
+          "type": "string"
+        },
+        "parse_pct_sample": {
+          "title": "Parse Pct Sample",
+          "type": "number"
+        },
+        "parse_pct_full": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parse Pct Full"
+        },
+        "min_utc": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Utc"
+        },
+        "max_utc": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Utc"
+        },
+        "timezone_in_data": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timezone In Data"
+        },
+        "alternatives": {
+          "items": {
+            "$ref": "#/$defs/Ratio"
+          },
+          "title": "Alternatives",
+          "type": "array"
+        }
+      },
+      "required": [
+        "field",
+        "format",
+        "parse_pct_sample"
+      ],
+      "title": "TimestampCandidate",
+      "type": "object"
+    },
+    "Warning_": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "field": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Field"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "title": "Warning_",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "profile_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Profile Version",
+      "type": "string"
+    },
+    "lang": {
+      "enum": [
+        "es",
+        "en"
+      ],
+      "title": "Lang",
+      "type": "string"
+    },
+    "generated_at_utc": {
+      "title": "Generated At Utc",
+      "type": "string"
+    },
+    "privacy": {
+      "$ref": "#/$defs/Privacy"
+    },
+    "source": {
+      "$ref": "#/$defs/Source"
+    },
+    "dataset": {
+      "$ref": "#/$defs/Dataset"
+    },
+    "fields": {
+      "items": {
+        "$ref": "#/$defs/FieldProfile"
+      },
+      "title": "Fields",
+      "type": "array"
+    },
+    "timestamp": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TimestampCandidate"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "mapping": {
+      "items": {
+        "$ref": "#/$defs/MappingEntry"
+      },
+      "title": "Mapping",
+      "type": "array"
+    },
+    "ambiguous": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Ambiguous",
+      "type": "array"
+    },
+    "unmapped_fields": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Unmapped Fields",
+      "type": "array"
+    },
+    "log_type_hints": {
+      "items": {
+        "$ref": "#/$defs/LogTypeHint"
+      },
+      "title": "Log Type Hints",
+      "type": "array"
+    },
+    "warnings": {
+      "items": {
+        "$ref": "#/$defs/Warning_"
+      },
+      "title": "Warnings",
+      "type": "array"
+    },
+    "llm_tasks": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Llm Tasks",
+      "type": "array"
+    }
+  },
+  "required": [
+    "lang",
+    "generated_at_utc",
+    "privacy",
+    "source",
+    "dataset",
+    "fields",
+    "mapping",
+    "log_type_hints",
+    "warnings"
+  ],
+  "title": "DataProfile",
+  "type": "object"
+}
