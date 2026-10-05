@@ -7,7 +7,7 @@ from interp_helpers import GOOD, REAL_DERIVED, Scripted, ok, real_profile
 from test_interpret_vocabulary import REAL_CLASSIFICATION, REAL_PARQUET_COLUMNS
 from test_timezone import NAIVE, agent_context, ingest, mapping_error
 
-from dfir_copilot.engine.profiler import LogProfiler as CanonicalProfiler
+from dfir_copilot.engine.profiler import CanonicalProfiler
 from dfir_copilot.engine.query_engine import QueryEngine
 from dfir_copilot.ingest.ingestor import local_timezone
 from dfir_copilot.interpret import (

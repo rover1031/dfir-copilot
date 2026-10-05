@@ -15,14 +15,21 @@ def _lit(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-class LogProfiler:
-    """Consultas de perfilado listas para usar; todas pasan por el QueryEngine (auditadas)."""
+class CanonicalProfiler:
+    """Consultas de perfilado sobre el dataset YA INGERIDO (esquema canónico); todas pasan por el QueryEngine (auditadas).
+
+    No confundir con `profiling.LogProfiler`, que perfila el archivo crudo antes de ingerirlo.
+    """
 
     def __init__(self, engine: QueryEngine):
         self.engine = engine
         self.columns: dict[str, str] = {
             row[0]: row[1] for row in engine.query("DESCRIBE logs").rows
         }
+        # Columnas canónicas que existen pero van vacías (el log no las aporta): contarlas daría 0 y parecería un dato.
+        manifest = getattr(engine, "manifest", None) or {}
+        rows = manifest.get("output", {}).get("rows")
+        self.empty = {c for c, n in manifest.get("null_counts", {}).items() if rows and n == rows}
 
     # --- validación: nada que llegue al SQL sin pasar por aquí -------------------
     def _dim(self, name: str) -> str:
@@ -51,13 +58,17 @@ class LogProfiler:
         return n
 
     # --- perfiles ---------------------------------------------------------------
-    def overview(self) -> QueryResult:
-        """Volumen, rango temporal y cardinalidad de las entidades principales."""
-        distinct = ", ".join(
-            f"count(DISTINCT {_q(c)}) AS {_q(c + '_distintos')}"
-            for c in _ENTITY_COLS
-            if c in self.columns
-        )
+    def overview(self, actor: str | None = None) -> QueryResult:
+        """Volumen, rango temporal y cardinalidad de las entidades con datos.
+
+        `actor`: la columna que el caso trata como actor (rol). Se cuenta como `actores_distintos`, así el resumen dice
+        cuántos actores hay aunque el actor sea `src_ip` (un log sin identidad) y no `user_id`.
+        """
+        parts = [f"count(DISTINCT {_q(c)}) AS {_q(c + '_distintos')}"
+                 for c in _ENTITY_COLS if c in self.columns and c not in self.empty]
+        if actor is not None:
+            parts.append(f"count(DISTINCT {self._dim(actor)}) AS actores_distintos")
+        distinct = ", ".join(parts)
         return self.engine.query(
             f"SELECT count(*) AS filas, min(timestamp_utc) AS desde, "
             f"max(timestamp_utc) AS hasta, {distinct} FROM logs"
@@ -111,3 +122,7 @@ class LogProfiler:
             f"SELECT date_trunc('{bucket}', {col}) AS {label}, count(*) AS peticiones "
             f"FROM logs{self._where(filters)} GROUP BY 1 ORDER BY 1"
         )
+
+
+# Nombre anterior: chocaba con `profiling.LogProfiler` (el perfilador del archivo crudo). Se mantiene para no romper notebooks.
+LogProfiler = CanonicalProfiler

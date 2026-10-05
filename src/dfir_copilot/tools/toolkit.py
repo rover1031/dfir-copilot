@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from dfir_copilot.detectors import available, correlate, run_detectors
 from dfir_copilot.detectors.roles import resolve_roles
-from dfir_copilot.engine.profiler import LogProfiler
+from dfir_copilot.engine.profiler import CanonicalProfiler
 from dfir_copilot.evidence.ledger import candidate_id, finding_id, query_id
 from dfir_copilot.tools.sanitize import clean_text, render, sanitize
 
@@ -60,7 +60,7 @@ class TimelineArgs(BaseModel):
 class Toolkit:
     def __init__(self, engine, ledger=None, limits: ToolLimits = ToolLimits()):
         self.engine, self.ledger, self.limits = engine, ledger, limits
-        self.profiler = LogProfiler(engine)
+        self.profiler = CanonicalProfiler(engine)
         self._roles = None  # se resuelven la primera vez que hacen falta (no cambian durante el hilo)
         self._tools = {
             "describe_dataset": (NoArgs, self._describe,
@@ -111,7 +111,7 @@ class Toolkit:
         m = self.engine.manifest or {}
         rows = m.get("output", {}).get("rows")
         empty = [c for c, n in m.get("null_counts", {}).items() if rows and n == rows]
-        ov = self.profiler.overview()
+        ov = self.profiler.overview(actor=self.roles.actor)
         return {
             "dataset_sha256": self.engine.dataset_sha256,
             "columns": dict(self.profiler.columns),
@@ -131,7 +131,7 @@ class Toolkit:
     def _profile(self, args: ProfileArgs) -> dict:
         p = self.profiler
         if args.kind == "overview":
-            res = p.overview()
+            res = p.overview(actor=self.roles.actor)
         elif args.kind == "timeline":
             res = p.timeline(args.bucket, args.filters)
         elif args.dimension is None:

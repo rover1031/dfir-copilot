@@ -1,5 +1,6 @@
 # Git limpia las salidas de los notebooks al hacer `git add` (ver tools/strip_notebook_outputs.py).
 # Requiere, una vez por clon:
 #   git config filter.stripnb.clean "python3 tools/strip_notebook_outputs.py"
+#   git config filter.stripnb.smudge cat        # obligatorio con required: sin él fallan checkout y archive
 #   git config filter.stripnb.required true
 *.ipynb filter=stripnb

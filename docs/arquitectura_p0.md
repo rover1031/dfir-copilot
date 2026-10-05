@@ -313,10 +313,14 @@ metadatos de ejecución; tu copia de trabajo conserva sus salidas. Se activa una
 
 ```bash
 git config filter.stripnb.clean "python3 tools/strip_notebook_outputs.py"
+git config filter.stripnb.smudge cat
 git config filter.stripnb.required true
 ```
 
 * `required = true`: si el archivo no es un notebook válido, `git add` falla en vez de guardarlo sin limpiar.
+* `smudge = cat` es **obligatorio** con `required`: al sacar un notebook del repositorio (`git checkout`, `git archive`) Git
+  exige ese lado del filtro y sin él falla con `smudge filter stripnb failed` (`git archive` deja un zip roto). `cat` deja
+  pasar el notebook tal cual. Faltaba en la primera versión de estas instrucciones (corregido en P1-b.1).
 * Serializa igual que Jupyter (claves ordenadas, sangría de 1, acentos sin escapar): un notebook recién guardado y sin
   salidas queda byte a byte igual, así que guardar no genera ruido en los diffs. Los notebooks del repositorio se
   entregan ya normalizados, con `id` fijo en cada celda.

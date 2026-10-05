@@ -100,7 +100,8 @@ def git(repo, *args):
 def repo(tmp_path):
     git(tmp_path, "init", "-q")
     for k, v in (("user.name", "t"), ("user.email", "t@t"), ("commit.gpgsign", "false"),
-                 ("filter.stripnb.clean", f"{sys.executable} {SCRIPT}"), ("filter.stripnb.required", "true")):
+                 ("filter.stripnb.clean", f"{sys.executable} {SCRIPT}"), ("filter.stripnb.smudge", "cat"),
+                 ("filter.stripnb.required", "true")):
         git(tmp_path, "config", k, v)
     (tmp_path / ".gitattributes").write_text("*.ipynb filter=stripnb\n", encoding="utf-8")
     return tmp_path
@@ -151,3 +152,47 @@ def test_git_add_falla_si_el_archivo_no_es_un_notebook_valido(repo):
     (repo / "roto.ipynb").write_text("{ esto no es json", encoding="utf-8")
     r = git(repo, "add", "roto.ipynb")
     assert r.returncode != 0 and git(repo, "ls-files").stdout == ""  # required=true: no se guarda sin limpiar
+
+
+# --- sacar notebooks del repositorio: lo que faltó probar en P0 ----------------------------------------------------
+def _committed(repo):
+    nb = repo / "a.ipynb"
+    nb.write_text(json.dumps(notebook(), indent=1) + "\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    assert git(repo, "commit", "-qm", "x").returncode == 0
+    return nb
+
+
+@pytestmark_git
+def test_git_archive_funciona_y_el_zip_lleva_los_notebooks_limpios(repo, tmp_path_factory):
+    import zipfile
+
+    _committed(repo)
+    out = tmp_path_factory.mktemp("arch") / "code.zip"
+    r = git(repo, "archive", "--format=zip", "-o", str(out), "HEAD")
+    assert r.returncode == 0, r.stderr
+    stored = json.loads(zipfile.ZipFile(out).read("a.ipynb"))
+    assert stored["cells"][1]["outputs"] == [] and "normal00" not in json.dumps(stored)
+
+
+@pytestmark_git
+def test_git_checkout_restaura_un_notebook(repo):
+    nb = _committed(repo)
+    nb.unlink()
+    r = git(repo, "checkout", "--", "a.ipynb")
+    assert r.returncode == 0, r.stderr
+    assert json.loads(nb.read_text(encoding="utf-8"))["cells"][1]["outputs"] == []
+
+
+@pytestmark_git
+def test_sin_smudge_y_con_required_git_archive_falla(repo, tmp_path_factory):
+    """Documenta por qué `smudge = cat` es obligatorio: sin él, `git archive` falla (y en P0 dejó un zip roto)."""
+    _committed(repo)
+    git(repo, "config", "--unset", "filter.stripnb.smudge")
+    r = git(repo, "archive", "--format=zip", "-o", str(tmp_path_factory.mktemp("arch") / "x.zip"), "HEAD")
+    assert r.returncode != 0 and "smudge" in r.stderr
+
+
+def test_las_instrucciones_del_filtro_incluyen_smudge():
+    for path in (SCRIPT, ROOT / ".gitattributes", ROOT / "docs" / "arquitectura_p0.md"):
+        assert "filter.stripnb.smudge cat" in path.read_text(encoding="utf-8"), path.name

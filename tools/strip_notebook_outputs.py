@@ -6,8 +6,12 @@ se aplica en `git add`: el repositorio guarda la versión limpia y tu copia de t
 
 Instalación (una vez por clon; `git config` no se versiona), desde la raíz del repositorio:
     git config filter.stripnb.clean "python3 tools/strip_notebook_outputs.py"
+    git config filter.stripnb.smudge cat
     git config filter.stripnb.required true
 y `.gitattributes` ya trae la línea `*.ipynb filter=stripnb`.
+
+`smudge cat` es obligatorio con `required true`: al SACAR un notebook del repositorio (`git checkout`, `git archive`) Git
+exige también ese lado del filtro, y sin él falla con "smudge filter stripnb failed". `cat` lo deja pasar tal cual.
 
 Lee el notebook por la entrada estándar y escribe la versión limpia por la salida estándar. Si lo que recibe no es un
 notebook válido, falla sin escribir nada: así `git add` se detiene en vez de guardar contenido sin limpiar.
