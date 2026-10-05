@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from dfir_copilot.detectors import available, correlate, run_detectors
 from dfir_copilot.engine.profiler import LogProfiler
-from dfir_copilot.evidence.ledger import finding_id, query_id
+from dfir_copilot.evidence.ledger import candidate_id, finding_id, query_id
 from dfir_copilot.tools.sanitize import clean_text, render, sanitize
 
 Bucket = Literal["hour", "day", "week", "month"]
@@ -160,7 +160,8 @@ class Toolkit:
             "detectors": [{"name": r.name, "status": r.status, "reason": r.reason, "findings": len(r.findings)}
                           for r in runs],
             "findings": findings,
-            "candidates": [{"entity": c.entity, "signals": c.signals, "severity": c.severity,
+            "candidates": [{"candidate_id": candidate_id(c, ds), "entity": c.entity, "signals": c.signals,
+                            "severity": c.severity,
                             "detectors": list(c.detectors)} for c in cases],
         }
 
@@ -187,7 +188,8 @@ class Toolkit:
     # --- salida segura y auditoría -----------------------------------------------------------
     def _finish(self, name, args, start, data) -> ToolOutput:
         clean, warnings = sanitize(data, self.limits.max_cell_chars)
-        payload = {"tool": name, "ok": True, "data": clean, "warnings": warnings[:10]}
+        qids = [query_id(q) for q in self.engine.history[start:] if q["status"] == "ok"][-5:]
+        payload = {"tool": name, "ok": True, "data": clean, "warnings": warnings[:10], "query_ids": qids}
         if len(warnings) > 10:
             payload["warnings"].append(f"... y {len(warnings) - 10} más")
         text = render(payload)

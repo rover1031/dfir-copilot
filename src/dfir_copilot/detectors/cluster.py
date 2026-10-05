@@ -34,10 +34,7 @@ def _components(pairs):
 @register
 class ActorIpCluster(Detector):
     name = "actor_ip_cluster"
-    description = (
-        "Grupos de identidades que concentran mucho volumen en pocas IPs; indica si el grupo es cerrado "
-        "(esas IPs no las usa nadie más)."
-    )
+    description = "Grupos de identidades con mucho volumen en pocas IPs; indica si el grupo es cerrado (nadie más usa esas IPs)."
 
     def __init__(self, actor_col: str = "user_id", k: float = 3.0, floor_pct: float = 0.05,
                  max_ips: int = 20, max_candidates: int = 40, min_actors: int = 5):

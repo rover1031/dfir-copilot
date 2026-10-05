@@ -8,7 +8,7 @@ WORKDIR /workspace
 
 COPY pyproject.toml ./
 COPY src ./src
-RUN pip install -e ".[notebook,dev,pdf]"
+RUN pip install -e ".[notebook,dev,pdf,agent,openai]"
 
 RUN useradd -m -u 1000 analyst && chown -R analyst /workspace
 USER analyst

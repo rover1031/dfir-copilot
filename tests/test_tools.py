@@ -173,3 +173,27 @@ def test_todas_las_llamadas_quedan_auditadas_en_el_ledger(kit):
 def test_funciona_sin_ledger(make_engine):
     engine, _ = make_engine()
     assert Toolkit(engine).call("run_query", {"sql": "SELECT 1 AS uno"}).ok
+
+
+def test_las_descripciones_de_detectores_caben_en_el_limite_de_celda():
+    from dfir_copilot.detectors import available
+
+    # describe_dataset las muestra al agente; si superan max_cell_chars se truncan a media frase
+    assert all(len(d) <= 120 for d in available().values()), {n: len(d) for n, d in available().items()}
+
+
+def test_run_detectors_expone_ids_de_caso_citables(kit):
+    tk, ledger, _ = kit
+    out = tk.call("run_detectors")
+    recorded = {e["data"]["candidate_id"] for e in ledger.entries("case_candidate")}
+    assert {c["candidate_id"] for c in out.data["candidates"]} == recorded
+
+
+def test_cada_resultado_indica_las_consultas_que_lo_respaldan(kit):
+    tk, ledger, _ = kit
+    out = tk.call("profile", {"kind": "top", "dimension": "user_agent"})
+    ids = {e["data"]["query_id"] for e in ledger.entries("query")}
+    assert '"query_ids"' in out.text and ids  # el modelo puede citar consultas reales
+    import json
+    body = json.loads(out.text.split("<datos_del_log>\n")[1].split("\n</datos_del_log>")[0])
+    assert body["query_ids"] and set(body["query_ids"]) <= ids

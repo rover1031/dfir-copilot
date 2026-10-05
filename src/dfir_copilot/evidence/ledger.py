@@ -51,6 +51,12 @@ def finding_id(finding, dataset_sha256: str) -> str:
     return "f-" + _sha(_canon(key))[:12]
 
 
+def candidate_id(case, dataset_sha256: str) -> str:
+    """Identificador determinista de un caso candidato (mismo cálculo que usa record_cases)."""
+    fids = sorted({finding_id(f, dataset_sha256) for f in case.findings})
+    return "c-" + _sha(_canon({"e": case.entity, "d": list(case.detectors), "f": fids}))[:12]
+
+
 class Ledger:
     """Bitácora de un caso. Úsala con `Ledger.open(...)`."""
 
@@ -67,6 +73,7 @@ class Ledger:
         self._queries = {e["data"]["query_id"] for e in self._entries if e["type"] == "query"}
         self._findings = {e["data"]["finding_id"] for e in self._entries if e["type"] == "finding"}
         self._candidates = {e["data"]["candidate_id"] for e in self._entries if e["type"] == "case_candidate"}
+        self._hypotheses = {e["data"]["hypothesis_id"] for e in self._entries if e["type"] == "hypothesis"}
 
     # --- apertura -------------------------------------------------------------------------
     @classmethod
@@ -119,6 +126,8 @@ class Ledger:
             os.fsync(fh.fileno())
         stored = json.loads(line)
         self._entries.append(stored)
+        if type_ == "hypothesis":
+            self._hypotheses.add(data["hypothesis_id"])
         return stored
 
     def record_queries(self, queries) -> int:
@@ -165,7 +174,7 @@ class Ledger:
             missing = [f for f in fids if f not in self._findings]
             if missing:
                 raise KeyError(f"Hallazgos sin registrar: {missing}. Llama antes a record_runs().")
-            cid = "c-" + _sha(_canon({"e": c.entity, "d": list(c.detectors), "f": fids}))[:12]
+            cid = candidate_id(c, self.dataset_sha256)
             if cid in self._candidates:
                 continue
             self.append("case_candidate", {"candidate_id": cid, "entity": c.entity, "signals": c.signals,
@@ -181,7 +190,7 @@ class Ledger:
             raise ValueError("La nota no puede estar vacía")
         if status not in NOTE_STATUSES:
             raise ValueError(f"status debe ser uno de {NOTE_STATUSES}")
-        known = self._queries | self._findings | self._candidates
+        known = self.known_refs()
         unknown = [r for r in refs if r not in known]
         if unknown:
             raise KeyError(f"Referencias desconocidas: {unknown}")
@@ -189,6 +198,10 @@ class Ledger:
                                     "analyst": analyst})
 
     # --- lectura y verificación ----------------------------------------------------------
+    def known_refs(self) -> set[str]:
+        """Identificadores citables como evidencia o referencia: consultas, hallazgos, casos e hipótesis."""
+        return self._queries | self._findings | self._candidates | self._hypotheses
+
     @property
     def head_hash(self) -> str:
         return self._entries[-1]["hash"] if self._entries else GENESIS
