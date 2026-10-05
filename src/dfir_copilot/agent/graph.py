@@ -269,7 +269,7 @@ class DfirAgent:
         for e in self.ledger.entries():
             d = e["data"]
             if e["type"] == "query" and d["query_id"] == ref:
-                return {"ref": ref, "tipo": "consulta", "detalle": f"{d['sql'][:200]} ({d['rows']} filas)"}
+                return {"ref": ref, "tipo": "consulta", "detalle": f"{d['sql'][:800]} ({d['rows']} filas)"}
             if e["type"] == "finding" and d["finding_id"] == ref:
                 return {"ref": ref, "tipo": "hallazgo", "detalle": f"[{d['severity']}] {d['summary']}"}
             if e["type"] == "case_candidate" and d["candidate_id"] == ref:
@@ -281,7 +281,7 @@ class DfirAgent:
         view = {"hypothesis_id": p["hypothesis_id"], "hipotesis": h["statement"], "estado_actual": h["status"],
                 "estado_solicitado": p["to"], "justificacion": p["rationale"],
                 "evidencia": [self._describe_ref(r) for r in p["evidence_refs"]]}
-        return sanitize(view, 300)[0]
+        return sanitize(view, 1500)[0]  # la justificación admite hasta 1000 caracteres: se muestra completa
 
     # --- API para el analista ----------------------------------------------------------------------
     def _config(self, thread_id: str) -> dict:

@@ -259,3 +259,20 @@ def test_aviso_si_la_respuesta_se_corta_por_max_tokens(setup):
     agent, _ = make([cut])
     r = agent.ask("¿Algo?")
     assert "LLM_MAX_TOKENS" in r.answer and ledger.entries("agent_turn")[-1]["data"]["stop_reason"] == "max_tokens"
+
+
+def test_la_vista_de_aprobacion_no_recorta_la_justificacion_ni_el_sql_citado(setup):
+    """Defecto visto en una ejecución real: la justificación salía cortada ('Pendiente d…[+26 car.]')."""
+    make, _, _, _ = setup
+    long_sql = "SELECT count(*) AS n /* " + "x" * 450 + " */ FROM logs"
+    long_reason = "Justificación detallada. " * 32  # ~800 caracteres
+
+    def confirm(messages):
+        ref = re.search(r"q-[0-9a-f]{12}", tool_text(messages)).group(0)
+        return call("update_hypothesis", hypothesis_id=HID, status="confirmada", evidence_refs=[ref], rationale=long_reason)
+
+    agent, _ = make([call("run_query", sql=long_sql), call("propose_hypothesis", statement=STATEMENT),
+                     call("update_hypothesis", hypothesis_id=HID, status="en_prueba"), confirm])
+    (req,) = agent.ask("Prueba").approvals
+    assert "…[+" not in req["justificacion"] and len(req["justificacion"]) >= 780
+    assert "x" * 400 in req["evidencia"][0]["detalle"]
