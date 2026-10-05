@@ -187,6 +187,25 @@ class CaseWorkspace:
     def engine(self, **kwargs) -> QueryEngine:
         return QueryEngine(self.processed_dir / self._dataset()["parquet"], **kwargs)
 
+    def pseudonymized(self, policy=None, **engine_kwargs):
+        """(motor, diccionario) sobre la copia seudonimizada del dataset del caso; la crea la primera vez.
+
+        Es lo que debe consultar todo lo que vea el LLM. El diccionario (alias -> valor real) se queda en `processed/`.
+        """
+        from dfir_copilot.privacy import PrivacyPolicy, Pseudonymizer, build_pseudonymized
+
+        policy = policy or PrivacyPolicy()
+        dataset = self._dataset()
+        parquet = self.processed_dir / dataset["parquet"]
+        stem = parquet.name.removesuffix(".parquet")
+        manifest_path = self.processed_dir / f"{stem}.pseudo-{policy.fingerprint()}.manifest.json"
+        pseudo = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else None
+        if pseudo is None or pseudo["source_parquet"]["sha256"] != dataset["parquet_sha256"]:
+            real = json.loads(parquet.with_suffix(".manifest.json").read_text(encoding="utf-8"))
+            pseudo = build_pseudonymized(parquet, real, self.processed_dir, policy)
+        engine = QueryEngine(pseudo["output"]["path"], **engine_kwargs)  # verifica el hash del Parquet seudonimizado
+        return engine, Pseudonymizer(pseudo)
+
     def ledger(self, engine: QueryEngine | None = None, analyst: str | None = None) -> Ledger:
         engine = engine or self.engine()
         return Ledger.open(self.case_id, engine, analyst=analyst or self.meta.get("analyst"), root=self.ledger_dir)
