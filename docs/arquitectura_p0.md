@@ -124,7 +124,7 @@ de parámetros pueden ser descriptivos. Ambos son metadatos de esquema, no regis
 |---|---|---|
 | **P0** | Generalización e integridad: perfilado local multi-formato y mapeo bilingüe (A), espacio por caso, integridad ledger/dataset, huella de resultados y roles (B2), Inspector e ingestor multi-formato (B1) | Hecho (§12, §13) |
 | **P1** | Agente. **Fase LLM**: una llamada que recibe solo el Data Profile y devuelve clasificación del log, confirmación del mapeo y consultas SQL propuestas (validadas con pydantic y ejecutadas en el motor seguro). Prompts bilingües que respetan el prefijo estable. Notas del analista visibles en cada pregunta, regla de falsabilidad, tope de tokens por pregunta, conversación persistente en disco | Pendiente |
-| **P2** | Entrega: reporte Markdown bilingüe generado desde el ledger, README, CLI (`dfir ingest`, `dfir ask`), `nbstripout` | Pendiente |
+| **P2** | Entrega: reporte Markdown bilingüe generado desde el ledger, README, CLI (`dfir ingest`, `dfir ask`) | Pendiente |
 | **P3** | Ampliación: logs no web (autenticación, EDR, firewall) con esquema canónico propio, Excel, GeoIP offline, inteligencia en PDF | Pendiente |
 
 La fase LLM es P1, no P0: P0 termina en el perfil, el mapeo y el borrador de mapping, que ya es lo que se enviaría al modelo.
@@ -304,3 +304,23 @@ no, con la misma lectura que el perfilador. Novedades del mapping:
 * **La hora sigue siendo una decisión humana.** Ningún código puede saber en qué zona exportó el sistema de origen.
 * **Tiempo:** unos 35 s sobre un CSV de 1 GB y 4,5 M de filas en un solo núcleo (perfil + muestra + dos pasadas
   completas), 0,2 GB de RAM; la ingesta tarda unos 30 s y usa hasta el límite de memoria configurado (2 GB).
+
+## 14. Higiene del repositorio: notebooks sin salidas
+
+Un notebook ejecutado guarda dentro del `.ipynb` todo lo que se imprimió (usuarios, IPs, conteos). `tools/strip_notebook_outputs.py`
+es un filtro *clean* de Git, solo con la biblioteca estándar: en `git add` quita `outputs`, `execution_count` y los
+metadatos de ejecución; tu copia de trabajo conserva sus salidas. Se activa una vez por clon (`git config` no se versiona):
+
+```bash
+git config filter.stripnb.clean "python3 tools/strip_notebook_outputs.py"
+git config filter.stripnb.required true
+```
+
+* `required = true`: si el archivo no es un notebook válido, `git add` falla en vez de guardarlo sin limpiar.
+* Serializa igual que Jupyter (claves ordenadas, sangría de 1, acentos sin escapar): un notebook recién guardado y sin
+  salidas queda byte a byte igual, así que guardar no genera ruido en los diffs. Los notebooks del repositorio se
+  entregan ya normalizados, con `id` fijo en cada celda.
+* **Limitación de Git:** `git status` puede mostrar ` M` en un notebook ejecutado aunque no haya nada nuevo, porque Git
+  compara primero el tamaño con el del índice y solo consulta el filtro si el tamaño coincide. Para ver qué cambió de
+  verdad usa `git diff`; tras `git add -A`, un notebook sin cambios reales desaparece de `git status`.
+* No reescribe commits anteriores: si ya se guardaron salidas, hay que corregir el historial antes del primer `push`.

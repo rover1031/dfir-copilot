@@ -1,3 +1,5 @@
-# Con `nbstripout --install` Git limpia las salidas de los notebooks al hacer commit.
-*.ipynb filter=nbstripout
-*.ipynb diff=ipynb
+# Git limpia las salidas de los notebooks al hacer `git add` (ver tools/strip_notebook_outputs.py).
+# Requiere, una vez por clon:
+#   git config filter.stripnb.clean "python3 tools/strip_notebook_outputs.py"
+#   git config filter.stripnb.required true
+*.ipynb filter=stripnb
