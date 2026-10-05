@@ -18,6 +18,11 @@ import yaml
 ALIASES_FILE = Path(__file__).with_name("aliases.yaml")
 STRONG, LEAF, TOKENS, WEAK, SEMANTIC = 1.0, 0.9, 0.75, 0.7, 0.55
 MIN_SCORE, AMBIGUITY_MARGIN = 0.5, 0.1
+# Contenido demasiado común para proponer un mapeo por sí solo fuera de un log web (un puerto 443 "parece" un código
+# HTTP; una ruta Linux "parece" una URL; "falcon.process" "parece" un dominio).
+GENERIC_SEMANTICS = {"http_status", "domain", "uri_path"}
+# Desempate entre tipos de log con igual puntuación: del más específico al más genérico.
+SPECIFICITY = ("edr", "dns", "firewall", "web", "proxy", "auth")
 
 # Por tipo de log: campos típicos y, entre ellos, los DISTINTIVOS (sin al menos uno, el tipo no aplica).
 LOG_SIGNATURES = {
@@ -58,6 +63,7 @@ class FieldMatch:
     score: float
     method: str  # alias | alias_leaf | tokens | weak_alias | semantic
     evidence: tuple = ()
+    rank: int = 0  # preferencia del alias (orden en aliases.yaml): desempata coincidencias con igual puntuación
 
 
 @dataclass
@@ -76,12 +82,17 @@ class SchemaMapper:
             base["weak_aliases"] = list(base.get("weak_aliases", [])) + list(spec.get("weak_aliases", []))
         self.canon = {}
         for canonical, spec in data.items():
+            strong = [normalize_name(canonical)] + [normalize_name(a) for a in spec.get("aliases", [])]
+            weak = [normalize_name(a) for a in spec.get("weak_aliases", [])]
+            rank: dict[str, int] = {}
+            for i, alias in enumerate(strong + weak):
+                rank.setdefault(alias, i)  # el primero en la lista es el preferido
             self.canon[canonical] = {
                 "domain": spec.get("domain", "common"),
                 "description": spec.get("description", {}),
                 "semantics": set(spec.get("semantics", [])),
-                "strong": {normalize_name(a) for a in spec.get("aliases", [])} | {normalize_name(canonical)},
-                "weak": {normalize_name(a) for a in spec.get("weak_aliases", [])},
+                "strong": set(strong), "weak": set(weak), "rank": rank,
+                "token_aliases": [a.split("_") for a in strong if a.count("_") >= 1],
             }
         self._order = {c: i for i, c in enumerate(self.canon)}
 
@@ -89,10 +100,14 @@ class SchemaMapper:
         return self.canon[canonical]["domain"]
 
     # --- puntuación de un campo contra cada canónico ------------------------------------------------------------
-    def candidates(self, f: FieldInfo) -> list[FieldMatch]:
+    @staticmethod
+    def _contains(seq: list, sub: list) -> bool:
+        return any(seq[i:i + len(sub)] == sub for i in range(len(seq) - len(sub) + 1))
+
+    def candidates(self, f: FieldInfo, allow_generic: bool = True) -> list[FieldMatch]:
         full = normalize_name(f.path)
         leaf = normalize_name(f.path.split(".")[-1])
-        tokens = set(full.split("_"))
+        tokens = full.split("_")
         dominant = {s for s, p in f.semantics.items() if p >= 80}
         present = {s for s, p in f.semantics.items() if p >= 50}
         if f.timestamp_pct >= 90:
@@ -100,18 +115,19 @@ class SchemaMapper:
             present.add("timestamp")
         out = []
         for canonical, spec in self.canon.items():
-            score, method, evidence = 0.0, None, []
+            score, method, evidence, rank = 0.0, None, [], 10_000
             if full in spec["strong"]:
-                score, method = STRONG, "alias"
+                score, method, rank = STRONG, "alias", spec["rank"][full]
                 evidence.append(f"alias:{full}")
             elif leaf != full and leaf in spec["strong"]:
-                score, method = LEAF, "alias_leaf"
+                score, method, rank = LEAF, "alias_leaf", spec["rank"][leaf]
                 evidence.append(f"alias:{leaf}")
-            elif any(len(a.split("_")) >= 2 and set(a.split("_")) <= tokens for a in spec["strong"]):
+            elif any(self._contains(tokens, a) for a in spec["token_aliases"]):
+                # el alias completo aparece SEGUIDO dentro del nombre: ip_origen_cliente sí; session_process_id no
                 score, method = TOKENS, "tokens"
                 evidence.append("tokens")
             elif full in spec["weak"]:
-                score, method = WEAK, "weak_alias"
+                score, method, rank = WEAK, "weak_alias", spec["rank"][full]
                 evidence.append(f"weak_alias:{full}")
             if method and spec["semantics"]:
                 if spec["semantics"] & dominant:
@@ -123,17 +139,26 @@ class SchemaMapper:
             if not method and spec["semantics"]:
                 strong_sem = ({s for s, p in f.semantics.items() if p >= 90}
                               | ({"timestamp"} if f.timestamp_pct >= 90 else set())) & spec["semantics"]
+                if not allow_generic:
+                    strong_sem -= GENERIC_SEMANTICS
                 if strong_sem:  # el nombre no dice nada, pero el contenido sí
                     score, method = SEMANTIC, "semantic"
                     evidence.append("semantics_only:" + ",".join(sorted(strong_sem)))
             if method and score >= MIN_SCORE:
-                out.append(FieldMatch(canonical, f.path, round(min(score, 1.0), 2), method, tuple(evidence)))
+                out.append(FieldMatch(canonical, f.path, round(min(score, 1.0), 2), method, tuple(evidence), rank))
         return out
 
     # --- asignación global ---------------------------------------------------------------------------------
     def propose(self, fields: list[FieldInfo]) -> MappingProposal:
-        cands = [m for f in fields for m in self.candidates(f)]
-        cands.sort(key=lambda m: (-m.score, self._order[m.canonical], m.field))
+        # Pasada 1 sin semántica genérica; si el log resulta ser web/proxy, pasada 2 con ella.
+        proposal = self._assign([m for f in fields for m in self.candidates(f, allow_generic=False)], fields)
+        hints = self.log_type_hints(proposal)
+        if hints and hints[0]["type"] in ("web", "proxy"):
+            proposal = self._assign([m for f in fields for m in self.candidates(f, allow_generic=True)], fields)
+        return proposal
+
+    def _assign(self, cands: list[FieldMatch], fields: list[FieldInfo]) -> MappingProposal:
+        cands.sort(key=lambda m: (-m.score, m.rank, self._order[m.canonical], m.field))
         matches, used = {}, set()
         for m in cands:
             if m.canonical in matches or m.field in used:
@@ -164,5 +189,5 @@ class SchemaMapper:
             score = round(0.5 * len(hit) / len(sig["fields"]) + 0.5 * len(keys) / len(sig["key"]), 2)
             if score >= 0.2:
                 hints.append({"type": log_type, "score": score, "evidence": hit})
-        hints.sort(key=lambda h: (-h["score"], h["type"]))
+        hints.sort(key=lambda h: (-h["score"], SPECIFICITY.index(h["type"])))
         return hints[:top]

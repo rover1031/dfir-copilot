@@ -22,6 +22,18 @@
         "nested": {
           "title": "Nested",
           "type": "boolean"
+        },
+        "fields_in_payload": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fields In Payload"
         }
       },
       "required": [

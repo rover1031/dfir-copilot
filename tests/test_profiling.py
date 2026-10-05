@@ -282,3 +282,81 @@ def test_limite_de_campos_en_json_muy_ancho(tmp_path):
     p = LogProfiler(path, max_fields=50).profile()
     assert p.dataset.field_count == 200 and p.dataset.profiled_fields == 50
     assert "warn.fields_truncated" in codes(p)
+
+
+# --- regresiones encontradas con una exportación real de Falcon / LogScale (fixture sintético, sin datos reales) ---
+def _logscale_like(n: int = 60) -> list[dict]:
+    """Estructura de LogScale: claves planas con '#', '@' y puntos literales; cada tipo de evento trae sus campos."""
+    rows = []
+    for i in range(n):
+        base = {"@timestamp": 1790000000000 + i * 1000, "timestamp": str(1790000000000 + i * 1000),
+                "#event_simpleName": ["ProcessRollup2", "NetworkConnectIP4", "DnsRequest"][i % 3],
+                "#event.dataset": "falcon.process", "ComputerName": f"HOST{i % 5}", "host.hostname": f"HOST{i % 5}",
+                "UserName": f"usuario{i % 4}", "user.name": f"usuario{i % 4}", "UID": str(1000 + i % 4),
+                "event.action": "process_start", "source.ip": f"10.20.0.{i}", "aid": f"{i:032x}",
+                **{f"VendorField{j}": f"valor-{j}-{i}" for j in range(70)}}
+        if i % 3 == 0:
+            base.update({"ImageFileName": "/usr/bin/bash", "FileName": "bash", "FilePath": "/usr/bin/",
+                         "CommandLine": f"bash -c id{i}", "ParentBaseFileName": "sshd", "process.pid": str(500 + i),
+                         "TargetProcessId": str(9000 + i), "SessionProcessId": str(7000 + i),
+                         "SHA256HashData": f"{i:064x}", "MD5HashData": f"{i:032x}"})
+        elif i % 3 == 1:
+            base.update({"RemoteAddressIP4": f"172.16.0.{i}", "LocalAddressIP4": f"10.20.0.{i}",
+                         "RPort": "443", "RemotePort": "443", "LocalPort": str(40000 + i), "Protocol": "6"})
+        rows.append(base)
+    return rows
+
+
+@pytest.fixture()
+def logscale_json(tmp_path):
+    path = tmp_path / "export.json"
+    path.write_text(json.dumps(_logscale_like()), encoding="utf-8")
+    return path
+
+
+def test_logscale_mapeo_prefiere_los_campos_correctos(logscale_json):
+    m = mapping(profile(logscale_json))
+    assert m["user_id"] == "UserName"            # nombre legible antes que el UID numérico
+    assert m["file_hash"] == "SHA256HashData"    # SHA-256 antes que MD5
+    assert m["file_path"] == "FilePath"          # ruta Linux confirma el alias, no lo desmiente
+    assert m["timestamp"] == "@timestamp" and m["process_name"] == "ImageFileName"
+
+
+def test_logscale_sin_mapeos_falsos_por_contenido_generico(logscale_json):
+    m = mapping(profile(logscale_json))
+    assert "status_code" not in m   # un puerto 443 no es un código HTTP fuera de un log web
+    assert "uri" not in m           # una ruta Linux no es una URL
+    assert "referer" not in m       # "falcon.process" no es un dominio
+    assert "session_id" not in m    # SessionProcessId no es un identificador de sesión
+
+
+def test_logscale_se_clasifica_como_edr(logscale_json):
+    assert profile(logscale_json).log_type_hints[0].type == "edr"
+
+
+def test_presupuesto_de_tamano_y_campos_mapeados_intactos(logscale_json):
+    p = profile(logscale_json)
+    payload = p.to_llm_json()
+    assert len(payload.encode("utf-8")) <= 24_000
+    assert p.dataset.fields_in_payload < p.dataset.profiled_fields and "warn.profile_trimmed" in codes(p)
+    in_payload = {f.path for f in p.fields}
+    assert {m.field for m in p.mapping} <= in_payload
+    assert set(p.unmapped_fields) >= {"VendorField0", "VendorField69"}  # lo recortado sigue listado por nombre
+
+
+def test_avisos_agrupados_un_aviso_por_tipo(logscale_json):
+    p = profile(logscale_json)
+    for code in ("warn.constant", "warn.high_nulls", "warn.all_null", "warn.pii"):
+        assert sum(w.code == code for w in p.warnings) <= 1, code
+
+
+def test_pocos_registros_no_generan_avisos_de_valor_constante(tmp_path):
+    path = tmp_path / "ocho.ndjson"  # como una exportación corta de una consola EDR
+    path.write_text("\n".join(json.dumps(r) for r in EDR[:8]), encoding="utf-8")
+    assert "warn.constant" not in codes(profile(path))  # con 8 eventos, "un único valor" no dice nada
+
+
+def test_logscale_ningun_valor_crudo(logscale_json):
+    payload = profile(logscale_json).to_llm_json()
+    assert not [s for s in ("HOST", "usuario", "10.20.0.", "172.16.0.", "valor-", "bash -c", "/usr/bin", "sshd")
+                if s in payload]

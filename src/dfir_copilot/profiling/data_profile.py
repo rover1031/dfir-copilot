@@ -41,6 +41,7 @@ class Dataset(_M):
     profiled_fields: int
     sample_rows: int
     nested: bool
+    fields_in_payload: int | None = None  # menor que profiled_fields si el perfil se recortó por tamaño
 
 
 class Ratio(_M):

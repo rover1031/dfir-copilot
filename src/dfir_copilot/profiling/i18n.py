@@ -103,6 +103,24 @@ _MESSAGES: dict[str, dict[str, str]] = {
         "en": "'{field}' holds the full HTTP request line (method, path and protocol together): "
               "it must be split at ingestion.",
     },
+    "warn.constant.many": {"es": "{count} campos tienen un único valor en todo el archivo: {fields}.",
+                           "en": "{count} fields hold a single value across the whole file: {fields}."},
+    "warn.high_nulls.many": {
+        "es": "{count} campos están vacíos en la mayoría de los registros (normal si cada tipo de evento trae campos "
+              "distintos): {fields}.",
+        "en": "{count} fields are empty in most records (normal when each event type carries different fields): "
+              "{fields}.",
+    },
+    "warn.all_null.many": {"es": "{count} campos están vacíos en todos los registros: {fields}.",
+                           "en": "{count} fields are empty in every record: {fields}."},
+    "warn.pii.many": {"es": "{count} campos contienen datos personales: {fields}.",
+                      "en": "{count} fields contain personal data: {fields}."},
+    "warn.profile_trimmed": {
+        "es": "El perfil se recortó para no superar {limit} KB: {omitted} campos sin mapear se listan solo por su "
+              "nombre en 'unmapped_fields'.",
+        "en": "The profile was trimmed to stay under {limit} KB: {omitted} unmapped fields are listed by name only "
+              "in 'unmapped_fields'.",
+    },
     # --- tipos de log ----------------------------------------------------------------------------------------------
     "log_type.web": {"es": "Acceso web / API", "en": "Web / API access"},
     "log_type.proxy": {"es": "Proxy web", "en": "Web proxy"},

@@ -61,8 +61,13 @@ ejecutan en el motor seguro de solo lectura. El LLM nunca obtiene acceso a archi
 3. **Ajuste por contenido:** +0,15 si los valores confirman el tipo esperado; −0,4 si lo contradicen. Si el nombre
    no dice nada pero el contenido es inequívoco (≥ 90 %), se propone por contenido (0,55). Así `http_staus`, con
    error tipográfico, se mapea a `status_code`.
-4. **Asignación:** voraz y determinista; cada campo se asigna una vez. Si otro candidato queda a ≤ 0,1, se marca
-   como ambiguo (p. ej. `client_ip` frente a `x_forwarded_for`).
+4. **Asignación:** voraz y determinista; cada campo se asigna una vez. Con igual puntuación gana el alias que
+   aparece **antes** en `aliases.yaml` (por eso el orden importa: `user_name` antes que `uid`, SHA-256 antes que MD5).
+   Si otro candidato queda a ≤ 0,1, se marca como ambiguo (p. ej. `client_ip` frente a `x_forwarded_for`).
+5. **Contenido genérico en dos pasadas:** códigos HTTP, dominios y rutas que empiezan por `/` son demasiado comunes
+   para proponer un mapeo por sí solos (un puerto 443 «parece» un código HTTP). Solo se usan si una primera pasada
+   ya identificó el log como web o proxy.
+6. **Tokens contiguos:** `ip_origen_cliente` contiene `ip_origen`; `session_process_id` **no** contiene `session_id`.
 
 ## 5. Contrato del Data Profile
 
@@ -79,6 +84,15 @@ Esquema completo: `docs/data_profile.schema.json`. Ejemplo (dataset sintético):
 | `log_type_hints[]` | Tipos de log candidatos con puntuación, etiqueta traducida y campos que lo sustentan. |
 | `warnings[]` | Código estable (inglés) + mensaje traducido. |
 | `llm_tasks[]` | Lo que se espera del LLM en la fase siguiente. |
+
+### Presupuesto de tamaño y avisos
+
+* El perfil no supera `max_profile_bytes` (24 KB por defecto, ≈ 6 000 tokens). Si se pasa, se recorta en este orden:
+  menos detalle en campos sin mapear → sin formas → fuera los campos sin mapear menos informativos (sus nombres
+  siguen en `unmapped_fields`) → sin formas en todo el perfil. Los campos mapeados nunca se eliminan.
+  `dataset.fields_in_payload` y el aviso `warn.profile_trimmed` dicen cuánto se recortó.
+* Los avisos repetidos (valor constante, vacíos, datos personales) se agrupan en uno por tipo. «Valor constante»
+  solo se avisa con 50 registros o más.
 
 ## 6. Privacidad: qué sale y qué no
 
@@ -114,7 +128,16 @@ de parámetros pueden ser descriptivos. Ambos son metadatos de esquema, no regis
 5. **Fase LLM:** herramienta del agente que recibe el Data Profile y devuelve clasificación, mapeo y consultas.
 6. **Prompts y reporte bilingües** (P1/P2).
 
-## 10. Rendimiento medido
+## 10. Lecciones del primer archivo real (exportación de Falcon / LogScale)
+
+108 claves planas con prefijos `#`/`@` y puntos literales, 8 eventos de tipos distintos. Encontró seis fallos que
+los datos sintéticos no tocaban: perfil de 47 KB (no había presupuesto), 81 avisos de ruido, mapeos falsos por
+contenido genérico (`RPort`→`status_code`, `FilePath`→`uri`), coincidencia por tokens demasiado permisiva
+(`SessionProcessId`→`session_id`), empates resueltos alfabéticamente (`UID` sobre `UserName`) y un tipo de log
+elegido por orden alfabético. Tras corregirlos: 23,6 KB, 8 avisos, mapeo correcto y clasificación EDR. Hay tests de
+regresión con un fixture sintético de la misma estructura; los datos reales no entran en el repositorio.
+
+## 11. Rendimiento medido
 
 CSV de 1,02 GB y 4.478.619 filas, 1 núcleo de CPU: **11,1 s** (incluye SHA-256), memoria máxima **0,18 GB**,
 perfil de **6,4 KB**.

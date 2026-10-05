@@ -1,7 +1,7 @@
 {
   "profile_version": "1.0",
   "lang": "es",
-  "generated_at_utc": "2026-10-05T03:39:42+00:00",
+  "generated_at_utc": "2026-10-05T04:05:47+00:00",
   "privacy": {
     "mode": "strict",
     "raw_values_included": false,
@@ -24,7 +24,8 @@
     "field_count": 8,
     "profiled_fields": 8,
     "sample_rows": 5700,
-    "nested": false
+    "nested": false,
+    "fields_in_payload": 8
   },
   "fields": [
     {

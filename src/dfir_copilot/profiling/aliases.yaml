@@ -61,7 +61,8 @@ action:
 user_id:
   domain: common
   description: {es: Identidad del actor, en: Actor identity}
-  aliases: [user_id, user, username, user_name, userid, account, account_name, principal, user_principal_name, upn,
+  # Orden = preferencia: nombres legibles antes que identificadores numéricos (uid)
+  aliases: [user_id, user_name, username, user, userid, account_name, account, principal, user_principal_name, upn,
             subject_user_name, target_user_name, user_identity_arn, cs_username, login, uid,
             usuario, nombre_usuario, nombre_de_usuario, id_usuario, cuenta, cuenta_usuario, login_usuario]
   weak_aliases: [actor, name, nombre]
@@ -160,12 +161,12 @@ parent_process:
 process_id:
   domain: endpoint
   description: {es: Identificador de proceso, en: Process id}
-  aliases: [process_id, pid, process_pid, target_process_id, id_proceso]
+  aliases: [process_id, pid, process_pid, target_process_id, raw_process_id, id_proceso]
 
 file_path:
   domain: endpoint
   description: {es: Ruta de archivo, en: File path}
-  semantics: [windows_path]
+  semantics: [windows_path, uri_path]   # uri_path también reconoce rutas Linux (/usr/bin/...)
   aliases: [file_path, target_filename, target_file_name, file_name, filename, full_path, file_target_path,
             ruta_archivo, archivo, nombre_archivo, ruta_fichero]
 
@@ -173,5 +174,6 @@ file_hash:
   domain: endpoint
   description: {es: Hash de archivo, en: File hash}
   semantics: [md5, sha1, sha256]
-  aliases: [file_hash, hash, hashes, sha256, sha1, md5, sha256_hash_data, md5_hash_data, process_hash_sha256,
-            file_hash_sha256, hash_sha256, hash_archivo, huella]
+  # Orden = preferencia: SHA-256 antes que SHA-1 y MD5 cuando el evento trae varios
+  aliases: [file_hash, sha256, sha256_hash_data, file_hash_sha256, process_hash_sha256, hash_sha256, hash, hashes,
+            sha1, sha1_hash_data, md5, md5_hash_data, hash_archivo, huella]

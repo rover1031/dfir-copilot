@@ -49,6 +49,8 @@ _PII = {"ipv4": "ip_address", "ipv6": "ip_address", "email": "email", "jwt": "to
         "mac": "mac_address"}
 _SAFE_PARAM = re.compile(r"^[A-Za-z0-9_.\-\[\]]{1,40}$")
 _TZ_SUFFIX = r"(?:Z|[+-]\d{2}:?\d{2})$"
+_GROUPABLE = ("warn.constant", "warn.high_nulls", "warn.all_null", "warn.pii")
+MIN_ROWS_FOR_CONSTANT = 50  # con menos registros, "un único valor" no dice nada
 
 
 def _q(name: str) -> str:
@@ -93,11 +95,12 @@ class LogProfiler:
 
     def __init__(self, path: str | Path, *, lang: str | None = None, sample_rows: int = 10_000,
                  max_fields: int = 150, max_depth: int = 6, memory_limit: str = "2GB", compute_hash: bool = True,
-                 mapper: SchemaMapper | None = None):
+                 max_profile_bytes: int = 24_000, mapper: SchemaMapper | None = None):
         self.path = Path(path)
         self.lang = resolve_lang(lang)
         self.sample_rows, self.max_fields, self.max_depth = int(sample_rows), int(max_fields), int(max_depth)
         self.memory_limit, self.compute_hash = memory_limit, compute_hash
+        self.max_profile_bytes = int(max_profile_bytes)
         self.mapper = mapper or SchemaMapper()
         self._warnings: list[Warning_] = []
 
@@ -309,7 +312,7 @@ class LogProfiler:
                 self._warn("warn.all_null", lf.path)
             elif rows and null_pct >= 90:
                 self._warn("warn.high_nulls", lf.path, pct=null_pct)
-            elif distinct == 1 and rows > 1:
+            elif distinct == 1 and rows >= MIN_ROWS_FOR_CONSTANT:
                 self._warn("warn.constant", lf.path)
             if fp.secret_in_values_pct > 0:
                 secret_keys = [k for k in fp.url_param_keys if re.search(
@@ -368,7 +371,8 @@ class LogProfiler:
                              evidence=h["evidence"]) for h in self.mapper.log_type_hints(proposal)]
         if not hints:
             hints = [LogTypeHint(type="unknown", label=t("log_type.unknown", self.lang), score=0.0, evidence=[])]
-        return DataProfile(
+        self._group_warnings()
+        profile = DataProfile(
             lang=self.lang, generated_at_utc=datetime.now(UTC).isoformat(timespec="seconds"),
             privacy=Privacy(notes=[t("privacy.strict", self.lang), t("privacy.enums", self.lang)]),
             source=Source(file_name=self.path.name, sha256=self._sha256(), size_bytes=self.path.stat().st_size,
@@ -381,3 +385,54 @@ class LogProfiler:
                                   evidence=list(m.evidence)) for m in proposal.matches.values()],
             ambiguous=proposal.ambiguous, unmapped_fields=proposal.unmapped,
             log_type_hints=hints, warnings=self._warnings)
+        return self._fit_budget(profile)
+
+    # --- avisos agrupados: uno por tipo cuando afectan a muchos campos ----------------------------------------------
+    def _group_warnings(self, threshold: int = 4) -> None:
+        grouped: list[Warning_] = []
+        for code in _GROUPABLE:
+            same = [w for w in self._warnings if w.code == code]
+            if len(same) >= threshold:
+                names = [w.field for w in same]
+                listed = ", ".join(names[:8]) + (f" (+{len(names) - 8})" if len(names) > 8 else "")
+                grouped.append(Warning_(code=code, message=t(f"{code}.many", self.lang, count=len(names),
+                                                             fields=listed)))
+        codes = {w.code for w in grouped}
+        self._warnings = [w for w in self._warnings if w.code not in codes] + grouped
+
+    # --- presupuesto de tamaño: el perfil debe seguir siendo "pocos KB" -----------------------------------------
+    def _fit_budget(self, profile: DataProfile) -> DataProfile:
+        def size() -> int:
+            return len(profile.to_llm_json().encode("utf-8"))
+
+        profile.dataset.fields_in_payload = len(profile.fields)
+        if size() <= self.max_profile_bytes:
+            return profile
+        unmapped = [f for f in profile.fields if f.mapped_to is None]
+        for f in unmapped:  # 1) menos detalle en lo que no está mapeado
+            f.shapes, f.length, f.url_param_keys = f.shapes[:1], None, f.url_param_keys[:5]
+            f.semantics = [r for r in f.semantics if r.pct >= 50]
+        if size() > self.max_profile_bytes:
+            for f in unmapped:  # 2) sin formas
+                f.shapes = []
+        omitted = 0
+        if size() > self.max_profile_bytes:
+            # 3) fuera los campos sin mapear menos informativos (los nombres siguen en unmapped_fields)
+            def value(f: FieldProfile) -> tuple:
+                informative = bool(f.pii or f.secret_in_values_pct or f.timestamp_format or f.semantics)
+                return (informative, -f.null_pct, f.distinct_approx or 0, f.path)
+
+            budget_msg = 400  # sitio para el aviso de recorte
+            for f in sorted(unmapped, key=value):
+                if size() + budget_msg <= self.max_profile_bytes:
+                    break
+                profile.fields.remove(f)
+                omitted += 1
+        if size() > self.max_profile_bytes:  # 4) último recurso: formas fuera en todo el perfil
+            for f in profile.fields:
+                f.shapes = []
+        profile.dataset.fields_in_payload = len(profile.fields)
+        if omitted:
+            profile.warnings.append(Warning_(code="warn.profile_trimmed", message=t(
+                "warn.profile_trimmed", self.lang, limit=self.max_profile_bytes // 1000, omitted=omitted)))
+        return profile
