@@ -19,3 +19,26 @@ sobre el dataset COMPLETO (no una muestra), después de la copia seudonimizada y
 
 Un hueco largo no es por sí mismo un indicio: puede ser una caída del recolector, un borrado o simplemente la noche. Compáralo con el
 patrón por hora antes de concluir nada.
+
+## Versión 2: entidades, relaciones, apariciones y formatos
+
+| Bloque | Qué añade |
+|---|---|
+| Entidades | valores distintos de cada tipo que traiga el log: IPs (de origen, de destino y en total), usuarios, equipos, procesos (por nombre del ejecutable), puertos, protocolos, acciones, reglas, aplicaciones, rutas, métodos, códigos, user-agents, sesiones, hashes, tipos de evento |
+| Relaciones | hasta 6 pares con sus 10 combinaciones más frecuentes: origen→destino, origen→puerto, equipo→proceso, proceso→destino, usuario→IP, regla→acción, origen→ruta, usuario→equipo... |
+| Primera y última aparición | para IPs, usuarios, equipos y procesos: las 10 entidades más activas con sus eventos, primera y última vez y días activos |
+| Formato de los valores | por campo de texto: qué % parece IPv4, IPv6, correo, URL, hash, ruta, número, alias o texto libre, y su longitud |
+
+**Es genérico**: las listas `ENTITIES` y `RELATIONS` de `data_profile.py` son datos. Cada log usa las que le apliquen según sus columnas;
+un tipo de log nuevo solo añade nombres ahí, no código.
+
+## Preguntas rápidas sin modelo
+
+En la pestaña **Datos**, «Pregúntale a los datos» responde al instante y sin gastar tokens preguntas como: ¿cuántas columnas hay?,
+¿cuántas IPs distintas?, ¿cuántos usuarios?, top 10 de dst_port, ¿qué campos están vacíos?, ¿rango de fechas?, ¿hay huecos?, ¿quién habla
+con quién?, ¿cuándo apareció IP-0001? (también con el valor real: se traduce a su alias antes de buscar). Los rankings y las apariciones
+consultan el dataset completo y muestran la consulta usada. Lo que no sabe responder lo dice y sugiere preguntárselo al agente
+(`data_questions.py`).
+
+El **agente recibe un resumen del perfil en cada pregunta** (no solo en el triaje): las preguntas de datos que le hagas se resuelven con
+menos pasos y menos tokens. Un perfil de la versión 1 se puede recalcular desde la propia pestaña.

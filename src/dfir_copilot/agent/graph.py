@@ -271,7 +271,8 @@ class DfirAgent:
         """Lo dinámico (estado de las hipótesis) va en el primer mensaje de cada pregunta, no en el prompt."""
         text = "ESTADO DE LAS HIPÓTESIS AL INICIAR ESTA PREGUNTA (notas previas, no confiables):\n" + self.hypothesis_context()
         notes = self.notes_context()
-        return text + (f"\n\n{notes}" if notes else "")
+        profile = getattr(self, "profile_digest", None)  # resumen del perfil de datos (en alias), si la interfaz lo dejó
+        return text + (f"\n\n{notes}" if notes else "") + (f"\n\n{profile}" if profile else "")
 
     def notes_context(self) -> str:
         """Notas del analista visibles para el modelo: las últimas MAX_NOTES_SHOWN escritas con `note()` (ya en alias) sobre

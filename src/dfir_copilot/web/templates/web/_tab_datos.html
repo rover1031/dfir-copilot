@@ -3,6 +3,16 @@
 <form hx-post="{{ base }}perfil/" hx-target="#tab" hx-swap="innerHTML">{% csrf_token %}<button type="submit">Calcular el perfil</button> <span class="spin">calculando sobre el dataset completo…</span>
 <small class="muted"> Local y sin modelo.</small></form></div>
 {% else %}
+<div class="card qa"><h3>💬 Pregúntale a los datos <small class="muted">· sin modelo, al instante, cero tokens</small></h3>
+<form hx-post="{{ base }}datos/preguntar/" hx-target="#qa-answer" hx-swap="innerHTML">{% csrf_token %}<input type="hidden" name="reveal" value="{% if reveal %}1{% else %}0{% endif %}">
+<div class="row"><input type="text" name="question" id="qa-q" placeholder="¿Cuántas IPs distintas hay?" required style="flex:1;min-width:240px">
+<button type="submit">Responder</button><span class="spin">calculando…</span></div></form>
+<p class="row examples">{% for e in qa_examples %}<a class="chip" onclick="document.getElementById('qa-q').value=this.textContent">{{ e }}</a>{% endfor %}</p>
+<div id="qa-answer"></div></div>
+{% if outdated %}<div class="msg info">Este perfil es de una versión anterior (sin entidades, relaciones ni formatos).
+<form hx-post="{{ base }}perfil/" hx-target="#tab" hx-swap="innerHTML" style="display:inline">{% csrf_token %}<input type="hidden" name="force" value="1"><button class="secondary" type="submit">Recalcular el perfil</button></form></div>{% endif %}
+{% if profile.entities %}<div class="card"><h3>Entidades <small class="muted">· valores distintos de cada tipo</small></h3>
+<div class="entities">{% for e in profile.entities %}<div class="ent"><strong>{{ e.distinct }}</strong><span>{{ e.label }}</span></div>{% endfor %}</div></div>{% endif %}
 <div class="grid">
 <div class="card"><h3>Dataset</h3><table><tr><td>Filas</td><td><strong>{{ profile.rows }}</strong></td></tr><tr><td>Columnas</td><td>{{ profile.columns|length }}</td></tr>
 {% if profile.time %}<tr><td>Rango (UTC)</td><td><small>{{ profile.time.from_utc }} → {{ profile.time.to_utc }}</small></td></tr>{% endif %}</table></div>
@@ -19,9 +29,17 @@
 <div class="bars hours">{% for h in profile.time.hours %}<div class="bar" style="height:{{ h.pct }}%" title="{{ h.h }}:00 → {{ h.n }}"><span>{{ h.h }}</span></div>{% endfor %}</div>
 <h3>Huecos más largos sin eventos</h3><p class="hint">Hueco típico entre eventos: {{ profile.time.median_gap_s }} s. Un hueco largo puede ser una caída del recolector, un borrado o simplemente la noche: compáralo con el patrón por hora.</p>
 <table><tr><th>Desde (UTC)</th><th>Hasta (UTC)</th><th>Segundos</th></tr>{% for g in profile.time.largest_gaps %}<tr><td>{{ g.0 }}</td><td>{{ g.1 }}</td><td>{{ g.2 }}</td></tr>{% endfor %}</table></div>{% endif %}
+{% if profile.relations %}<h2>Relaciones <small class="muted">· quién con quién, por número de eventos</small></h2><div class="grid">
+{% for r in profile.relations %}<div class="card"><h3><code>{{ r.from }}</code> → <code>{{ r.to }}</code></h3><p class="hint">{{ r.pairs }} pares distintos</p>
+<table><tr><th>De</th><th>A</th><th>Eventos</th></tr>{% for p in r.top|slice:":6" %}<tr><td>{{ p.0 }}</td><td>{{ p.1 }}</td><td>{{ p.2 }}</td></tr>{% endfor %}</table></div>{% endfor %}</div>{% endif %}
+{% if profile.first_last %}<div class="card"><h3>Primera y última aparición <small class="muted">· las entidades más activas (UTC)</small></h3>
+{% for f in profile.first_last %}<details {% if forloop.first %}open{% endif %}><summary><code>{{ f.column }}</code></summary>
+<table><tr><th>Valor</th><th>Eventos</th><th>Primera vez</th><th>Última vez</th><th>Días activos</th></tr>
+{% for x in f.top %}<tr><td>{{ x.0 }}</td><td>{{ x.1 }}</td><td><small>{{ x.2 }}</small></td><td><small>{{ x.3 }}</small></td><td>{{ x.4 }}</td></tr>{% endfor %}</table></details>{% endfor %}</div>{% endif %}
 <div class="card"><h3>Campos</h3><p class="hint">Calculado por código sobre el dataset completo. Los valores salen en alias salvo que actives «Mostrar valores reales».</p>
-<table><tr><th>Campo</th><th>Tipo</th><th>Con valor</th><th>Distintos</th><th>Más frecuentes</th></tr>
+<table><tr><th>Campo</th><th>Tipo</th><th>Con valor</th><th>Distintos</th><th>Formato</th><th>Más frecuentes</th></tr>
 {% for c in profile.columns %}<tr><td><code>{{ c.name }}</code></td><td><small>{{ c.type }}</small></td><td>{{ c.filled_pct }} %</td><td>{{ c.distinct }}</td>
+<td><small>{% for f in c.formats|slice:":2" %}<span class="fmt fmt-{{ f.0 }}">{{ f.0 }} {{ f.1 }}%</span> {% endfor %}{% if c.length %}<br>long. {{ c.length.min }}–{{ c.length.max }}{% endif %}</small></td>
 <td><small>{% if c.unique_per_row %}un valor distinto por fila (identificador){% else %}{% for t in c.top|slice:":5" %}<code>{{ t.0 }}</code> ×{{ t.1 }}{% if not forloop.last %} · {% endif %}{% endfor %}{% endif %}
 {% if c.stats %}<br>mín {{ c.stats.min }} · p50 {{ c.stats.p50 }} · p95 {{ c.stats.p95 }} · máx {{ c.stats.max }}{% endif %}</small></td></tr>{% endfor %}</table></div>
 {% endif %}

@@ -235,13 +235,20 @@ def _tab_datos(ctx, b, reveal):
     v = _shower(b, reveal)
     for c in prof["columns"]:
         c["top"] = [[v(x), n] for x, n in c.get("top", [])]
+    for r in prof.get("relations", []):
+        r["top"] = [[v(a), v(c), n] for a, c, n in r["top"]]
+    for f in prof.get("first_last", []):
+        f["top"] = [[v(x), *rest] for x, *rest in f["top"]]
     t = prof.get("time")
     if t:
         top_day = max((n for _, n in t["per_day"]), default=0) or 1
         t["days"] = [{"d": d, "n": n, "pct": round(100 * n / top_day, 1)} for d, n in t["per_day"]]
         top_hour = max(t["per_hour"]) or 1
         t["hours"] = [{"h": h, "n": n, "pct": round(100 * n / top_hour, 1)} for h, n in enumerate(t["per_hour"])]
-    return {"profile": prof}
+    from dfir_copilot.data_profile import PROFILE_VERSION
+    from dfir_copilot.data_questions import EXAMPLES
+
+    return {"profile": prof, "qa_examples": EXAMPLES, "outdated": prof.get("profile_version", 1) < PROFILE_VERSION}
 
 
 def _auto_running(ctx) -> bool:
@@ -666,13 +673,37 @@ def reset_conversation(request, pid, cid):
 def compute_profile(request, pid, cid):
     """Calcula el perfil de un caso que no lo tiene (p. ej. uno anterior a esta etapa). Local, sin modelo."""
     from dfir_copilot.data_profile import build_profile, save_profile
+    from dfir_copilot.web.services import refresh_profile_digest
+
+    ctx = _ctx(pid, cid)
+    b = _bundle(ctx)
+    path = ctx.ws.dir / "p1" / "perfil_datos.json"
+    if not path.exists() or request.POST.get("force") == "1":  # force: recalcular un perfil de una versión anterior
+        prof = build_profile(b.pseudo)
+        sha = save_profile(prof, path)
+        b.ledger.append("data_profile", {"file": "p1/perfil_datos.json", "sha256": sha, "rows": prof["rows"],
+                                         "columns": len(prof["columns"]), "copy": b.pseudo.copy_id})
+        refresh_profile_digest(b.agent, ctx.ws)
+    return _render_tab(request, ctx, "datos", ("ok", "Perfil calculado sobre el dataset completo (local, sin modelo)."))
+
+
+@require_POST
+def data_question(request, pid, cid):
+    """Preguntas rápidas sobre los datos, sin modelo. La pregunta pasa por el mismo guardián que las del agente (valores reales -> alias)
+    y la respuesta se muestra en alias, o con valores reales si el interruptor está activo."""
+    from dfir_copilot.data_questions import answer
 
     ctx = _ctx(pid, cid)
     b = _bundle(ctx)
     path = ctx.ws.dir / "p1" / "perfil_datos.json"
     if not path.exists():
-        prof = build_profile(b.pseudo)
-        sha = save_profile(prof, path)
-        b.ledger.append("data_profile", {"file": "p1/perfil_datos.json", "sha256": sha, "rows": prof["rows"],
-                                         "columns": len(prof["columns"]), "copy": b.pseudo.copy_id})
-    return _render_tab(request, ctx, "datos", ("ok", "Perfil calculado sobre el dataset completo (local, sin modelo)."))
+        return _msg(request, "Calcula primero el perfil de datos.", status=409)
+    try:
+        question = b.agent.preview((request.POST.get("question") or "").strip()).text
+    except AmbiguousText as exc:
+        return _msg(request, str(exc), status=422)
+    a = answer(question, json.loads(path.read_text(encoding="utf-8")), b.pseudo)
+    v = _shower(b, _reveal(request))
+    a.text = v(a.text)
+    a.rows = [[v(x) if isinstance(x, str) else x for x in row] for row in a.rows]
+    return render(request, "web/_data_answer.html", {"a": a})

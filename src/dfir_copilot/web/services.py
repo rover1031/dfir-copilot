@@ -121,6 +121,7 @@ class Services:
                 llm, ok = NoModel(), False
             agent = build_agent(pseudo, ledger, llm, analyst=s.analyst, max_steps=14, max_tokens=s.max_tokens,
                                 max_tokens_case=s.max_tokens_case, pseudonymizer=ps, checkpointer=ws.checkpointer())
+            refresh_profile_digest(agent, ws)
             self._bundles[key] = Bundle(ws, real, pseudo, ps, ledger, agent, ok)
             return self._bundles[key]
 
@@ -171,3 +172,14 @@ def reset_services(**kwargs) -> Services:
     global _services
     _services = Services(**kwargs)
     return _services
+
+
+def refresh_profile_digest(agent, ws) -> None:
+    """El agente de la interfaz recibe en cada pregunta el resumen del perfil de datos: una pregunta de datos se resuelve en uno o dos pasos
+    en vez de diez. Va en el mensaje de la pregunta (no en el prompt de sistema), así no invalida conversaciones guardadas."""
+    import json
+
+    from dfir_copilot.data_profile import digest
+
+    path = ws.dir / "p1" / "perfil_datos.json"
+    agent.profile_digest = digest(json.loads(path.read_text(encoding="utf-8"))) if path.exists() else None

@@ -559,3 +559,22 @@ def test_el_proyecto_muestra_el_consumo_de_tokens_por_caso(env):
     client, _, _ = env                                                           # el triaje simulado gastó tokens
     page = client.get("/proyectos/analisis-1/").content.decode()
     assert "🪙" in page and "tokens" in page
+
+
+# --- preguntas rápidas sin modelo y perfil en cada pregunta del agente -------------------------------------------------------
+
+def test_preguntas_rapidas_en_la_pestana_datos_con_valores_reales_traducidos(quiet):
+    client, _, _ = quiet
+    page = client.get(CASE + "tab/datos/").content.decode()
+    assert "Pregúntale a los datos" in page and "Entidades" in page and "Relaciones" in page
+    r = client.post(CASE + "datos/preguntar/", {"question": "¿Cuántas IPs distintas hay?"}).content.decode()
+    assert "IPs de origen" in r
+    hidden = client.post(CASE + "datos/preguntar/", {"question": "¿Cuándo apareció atacante00?"}).content.decode()
+    shown = client.post(CASE + "datos/preguntar/", {"question": "¿Cuándo apareció atacante00?", "reveal": "1"}).content.decode()
+    assert "user_id" in hidden and "atacante00" not in hidden and "atacante00" in shown         # se busca por su alias
+
+
+def test_el_agente_de_la_interfaz_recibe_el_perfil_en_cada_pregunta(quiet):
+    _, sv, _ = quiet
+    b = sv.bundle(sv.case("analisis-1", "analisis-1--three-months"))
+    assert "PERFIL DE DATOS" in b.agent.briefing() and "Entidades:" in b.agent.briefing()

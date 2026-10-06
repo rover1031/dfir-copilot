@@ -116,3 +116,16 @@ progress { width:100%; height:10px; accent-color:var(--amber); }
 .bars .bar:hover { opacity:1; } .bars.hours .bar { background:linear-gradient(180deg, var(--amber) 0%, #e9c46a 100%); }
 .bars.hours .bar span { position:absolute; bottom:-17px; left:0; right:0; text-align:center; font-size:10px; color:var(--muted); }
 .bars.hours { margin-bottom:24px; }
+
+/* pestaña Datos: entidades, formatos y preguntas rápidas */
+.entities { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; }
+.ent { border-radius:10px; padding:10px 12px; background:var(--blue-soft); border:1px solid var(--blue-line); }
+.ent strong { display:block; font-size:22px; color:var(--navy); } .ent span { font-size:12.5px; color:var(--navy-2); }
+.ent:nth-child(4n+2) { background:var(--amber-soft); border-color:var(--amber-line); } .ent:nth-child(4n+2) strong { color:var(--amber-ink); }
+.ent:nth-child(4n+3) { background:var(--green-soft); border-color:var(--green-line); } .ent:nth-child(4n+3) strong { color:var(--green); }
+.ent:nth-child(4n+4) { background:var(--lilac-soft); border-color:var(--lilac-line); } .ent:nth-child(4n+4) strong { color:var(--lilac); }
+.card.qa { border-top:3px solid var(--amber); } .examples .chip { cursor:pointer; } .examples .chip:hover { background:var(--amber-soft); }
+.fmt { display:inline-block; padding:0 6px; border-radius:5px; background:#f0ece3; margin:1px 0; }
+.fmt-ipv4, .fmt-ipv6 { background:var(--blue-soft); color:var(--blue); } .fmt-alias { background:var(--lilac-soft); color:var(--lilac); }
+.fmt-hash { background:var(--amber-soft); color:var(--amber-ink); } .fmt-url, .fmt-ruta { background:var(--green-soft); color:var(--green); }
+.fmt-email { background:var(--red-soft); color:var(--red); }

@@ -7,6 +7,13 @@ Qué calcula:
 * **Tiempo**: eventos por día y por hora (en la zona local si se declaró; si no, UTC) y los **huecos** más largos entre eventos
   consecutivos frente al hueco típico: en forense, un hueco puede ser una caída del recolector o un borrado.
 * **Calidad**: filas duplicadas, horas que no se pudieron leer, columnas vacías.
+* **Entidades** (versión 2): cuántas IPs de origen y de destino, usuarios, equipos, procesos, puertos, reglas, rutas... las que traiga el log.
+* **Relaciones**: los pares más frecuentes (origen -> destino, equipo -> proceso, usuario -> IP...) entre las columnas presentes.
+* **Primera y última aparición** de las entidades principales, con sus eventos y días activos.
+* **Formato de los valores** de cada campo de texto: qué parte parecen IPs, correos, hashes, URLs, rutas, números o alias.
+
+Todo es GENÉRICO: las listas de abajo son datos, no código por tipo de log. Un log web, de firewall, de endpoint o de un tipo futuro usa
+las que le apliquen según las columnas que traiga; un tipo nuevo solo tiene que añadir nombres aquí.
 
 Se calcula sobre la COPIA SEUDONIMIZADA: el resultado lleva alias, se puede mostrar al modelo y se guarda en el caso con su hash en el
 ledger. La interfaz traduce los alias a valores reales solo en pantalla, con el interruptor de siempre.
@@ -17,6 +24,39 @@ import hashlib
 import json
 from pathlib import Path
 
+PROFILE_VERSION = 2
+# (columna canónica, etiqueta, sinónimos para las preguntas rápidas). El orden es el de presentación.
+ENTITIES = (
+    ("src_ip", "IPs de origen", ("ip de origen", "ips de origen", "ip origen", "ips origen", "source ip", "source ips", "origen")),
+    ("dst_ip", "IPs de destino", ("ip de destino", "ips de destino", "ip destino", "ips destino", "destination ip", "destino")),
+    ("user_id", "usuarios", ("usuarios", "usuario", "users", "user", "cuentas", "cuenta")),
+    ("host", "equipos / hosts", ("equipos", "equipo", "hosts", "host", "maquinas", "maquina", "dispositivos", "dispositivo")),
+    ("process_name", "procesos", ("procesos", "proceso", "processes", "process", "ejecutables", "ejecutable", "binarios")),
+    ("parent_process", "procesos padre", ("procesos padre", "proceso padre", "padres", "parent")),
+    ("dst_port", "puertos de destino", ("puertos", "puerto", "ports", "port")),
+    ("protocol", "protocolos", ("protocolos", "protocolo", "protocols", "protocol")),
+    ("action", "acciones", ("acciones", "accion", "actions", "action")),
+    ("rule_name", "reglas", ("reglas", "regla", "rules", "rule", "politicas")),
+    ("application", "aplicaciones", ("aplicaciones", "aplicacion", "applications", "apps")),
+    ("endpoint", "rutas (URL)", ("rutas", "ruta", "urls", "url", "endpoints")),
+    ("http_method", "métodos HTTP", ("metodos", "metodo", "methods")),
+    ("status_code", "códigos de respuesta", ("codigos", "codigo", "status")),
+    ("user_agent", "user-agents", ("user agents", "user-agents", "user agent", "navegadores")),
+    ("session_id", "sesiones", ("sesiones", "sesion", "sessions")),
+    ("file_hash", "hashes", ("hashes", "hash", "sha256")),
+    ("event_type", "tipos de evento", ("tipos de evento", "tipo de evento", "event types")),
+)
+# Pares que interesan si el log trae ambas columnas (como mucho MAX_RELATIONS, en este orden).
+RELATIONS = (("src_ip", "dst_ip"), ("src_ip", "dst_port"), ("host", "process_name"), ("process_name", "dst_ip"), ("user_id", "src_ip"),
+             ("rule_name", "action"), ("src_ip", "endpoint"), ("user_id", "host"), ("host", "dst_ip"), ("user_id", "endpoint"))
+MAX_RELATIONS = 6
+FIRST_LAST = ("src_ip", "dst_ip", "user_id", "host", "process_name")
+_FORMATS = (  # (clase, expresión regular): la primera que encaja
+    ("alias", r"^[A-Z]{1,6}-[0-9]{2,}$"), ("ipv4", r"^([0-9]{1,3}\.){3}[0-9]{1,3}$"),
+    ("ipv6", r"^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$"), ("email", r"^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$"),
+    ("url", r"^(https?://|www\.)"), ("hash", r"^([0-9a-fA-F]{32}|[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$"),
+    ("ruta", r"^([A-Za-z]:\\|\\|/)"), ("número", r"^-?[0-9]+(\.[0-9]+)?$"),
+)
 _NUMERIC = ("TINYINT", "SMALLINT", "INTEGER", "BIGINT", "HUGEINT", "UTINYINT", "USMALLINT", "UINTEGER", "UBIGINT", "FLOAT", "DOUBLE", "DECIMAL")
 _SKIP = {"source_row"}
 
@@ -30,6 +70,58 @@ def _num(v):
         return None
     f = float(v)
     return int(f) if f.is_integer() else round(f, 3)
+
+
+def column_for(name: str, present: set[str]) -> str:
+    """Columna a contar para una entidad: el nombre del ejecutable (`<col>_base`) si la copia lo trae, si no la propia columna."""
+    return f"{name}_base" if f"{name}_base" in present else name
+
+
+def _lit(v: str) -> str:
+    return "'" + v.replace("'", "''") + "'"
+
+
+def _extended(engine, columns: list[dict], present: set[str], total: int) -> dict:
+    filled = {c["name"]: c["filled"] for c in columns}
+    has = lambda c: c in present and filled.get(c, 0) > 0  # noqa: E731
+    entities = []
+    for name, label, _ in ENTITIES:
+        col = column_for(name, present)
+        if has(col):
+            entities.append({"column": name, "counted": col, "label": label,
+                             "distinct": int(engine.query(f"SELECT count(DISTINCT {_q(col)}) FROM logs").rows[0][0])})
+    if has("src_ip") and has("dst_ip"):
+        both = engine.query("SELECT count(DISTINCT v) FROM (SELECT src_ip AS v FROM logs UNION ALL SELECT dst_ip FROM logs) WHERE v IS NOT NULL")
+        entities.insert(0, {"column": "ip", "counted": "src_ip+dst_ip", "label": "IPs en total (origen o destino)",
+                            "distinct": int(both.rows[0][0])})
+    relations = []
+    for a, b in RELATIONS:
+        ca, cb = column_for(a, present), column_for(b, present)
+        if len(relations) >= MAX_RELATIONS or not (has(ca) and has(cb)):
+            continue
+        n = engine.query(f"SELECT count(*) FROM (SELECT DISTINCT {_q(ca)}, {_q(cb)} FROM logs WHERE {_q(ca)} IS NOT NULL AND {_q(cb)} IS NOT NULL)").rows[0][0]
+        top = engine.query(f"SELECT CAST({_q(ca)} AS VARCHAR), CAST({_q(cb)} AS VARCHAR), count(*) AS n FROM logs WHERE {_q(ca)} IS NOT NULL "
+                           f"AND {_q(cb)} IS NOT NULL GROUP BY 1, 2 ORDER BY n DESC, 1, 2 LIMIT 10").rows
+        relations.append({"from": a, "to": b, "pairs": int(n), "top": [[x, y, int(k)] for x, y, k in top]})
+    first_last = []
+    if "timestamp_utc" in present:
+        for name in FIRST_LAST:
+            col = column_for(name, present)
+            if has(col):
+                rows = engine.query(
+                    f"SELECT CAST({_q(col)} AS VARCHAR) AS v, count(*) AS n, CAST(min(timestamp_utc) AS VARCHAR), CAST(max(timestamp_utc) AS VARCHAR), "
+                    f"count(DISTINCT CAST(timestamp_utc AS DATE)) FROM logs WHERE {_q(col)} IS NOT NULL GROUP BY 1 ORDER BY n DESC, v LIMIT 10").rows
+                first_last.append({"column": name, "top": [[v, int(n), a, b, int(d)] for v, n, a, b, d in rows]})
+    for c in columns:
+        if c["filled"] and c["type"].startswith("VARCHAR"):
+            cls = " ".join(f"WHEN regexp_matches(v, {_lit(rx)}) THEN {_lit(name)}" for name, rx in _FORMATS)
+            rows = engine.query(f"SELECT CASE {cls} ELSE 'texto' END AS f, count(*) AS n FROM (SELECT CAST({_q(c['name'])} AS VARCHAR) AS v "
+                                f"FROM logs WHERE {_q(c['name'])} IS NOT NULL) GROUP BY 1 ORDER BY n DESC, f").rows
+            c["formats"] = [[f, round(100 * n / c["filled"], 1)] for f, n in rows]
+            mn, avg, mx = engine.query(f"SELECT min(length(CAST({_q(c['name'])} AS VARCHAR))), avg(length(CAST({_q(c['name'])} AS VARCHAR))), "
+                                       f"max(length(CAST({_q(c['name'])} AS VARCHAR))) FROM logs").rows[0]
+            c["length"] = {"min": _num(mn), "avg": _num(avg), "max": _num(mx)}
+    return {"entities": entities, "relations": relations, "first_last": first_last}
 
 
 def build_profile(engine, top_n: int = 10) -> dict:
@@ -88,7 +180,8 @@ def build_profile(engine, top_n: int = 10) -> dict:
                        ).rows[0][0] if data_cols else 0
     quality = {"duplicate_rows": int(dup), "empty_columns": [c["name"] for c in columns if c["filled"] == 0],
                "unreadable_times": time["unreadable"] if time else None}
-    return {"profile_version": 1, "rows": total, "columns": columns, "ips": ips, "time": time, "quality": quality}
+    return {"profile_version": PROFILE_VERSION, "rows": total, "columns": columns, "ips": ips, "time": time, "quality": quality,
+            **_extended(engine, columns, present, total)}
 
 
 def digest(profile: dict, limit: int = 1800) -> str:
@@ -102,6 +195,10 @@ def digest(profile: dict, limit: int = 1800) -> str:
         if t["largest_gaps"]:
             a, b, s = t["largest_gaps"][0]
             out.append(f"Hueco más largo sin eventos: {s:,} s ({a} → {b}); hueco típico {t['median_gap_s']} s.")
+    if profile.get("entities"):
+        out.append("Entidades: " + ", ".join(f"{e['label']} {e['distinct']:,}" for e in profile["entities"]) + ".")
+    for rel in profile.get("relations", [])[:3]:
+        out.append(f"{rel['from']}→{rel['to']} ({rel['pairs']:,} pares): " + ", ".join(f"{a}→{b}={n:,}" for a, b, n in rel["top"][:3]) + ".")
     for ip in profile["ips"]:
         out.append(f"{ip['column']}: " + ", ".join(f"{s} {n:,} eventos/{d:,} distintas" for s, n, d in ip["scopes"]) + ".")
     for c in profile["columns"]:
@@ -122,4 +219,4 @@ def save_profile(profile: dict, path: str | Path) -> str:
     return hashlib.sha256((data + "\n").encode("utf-8")).hexdigest()
 
 
-__all__ = ["build_profile", "digest", "save_profile"]
+__all__ = ["ENTITIES", "PROFILE_VERSION", "RELATIONS", "build_profile", "column_for", "digest", "save_profile"]

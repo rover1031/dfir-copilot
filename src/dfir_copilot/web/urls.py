@@ -16,6 +16,7 @@ CASE_ROUTES = [
     ("zona/", views.timezone_confirm, "case_timezone"),
     ("reiniciar/", views.reset_conversation, "case_reset"),
     ("perfil/", views.compute_profile, "case_profile"),
+    ("datos/preguntar/", views.data_question, "case_data_question"),
 ]
 
 urlpatterns = [
