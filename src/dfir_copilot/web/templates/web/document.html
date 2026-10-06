@@ -1,0 +1,6 @@
+{% extends "web/base.html" %}
+{% block title %}{{ source.name }} · DFIR Co-pilot{% endblock %}
+{% block content %}
+<p><a href="/proyectos/{{ project.id }}/archivos/">← Archivos del análisis</a></p>
+{% include "web/_document_body.html" %}
+{% endblock %}

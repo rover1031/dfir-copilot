@@ -113,3 +113,35 @@ def test_pdf_raster_deja_candidatos_y_se_verifica_despues_sin_repetir_el_ocr(tmp
     monkeypatch.setattr(R, "_ocr_words", lambda *a, **k: (_ for _ in ()).throw(AssertionError("sin OCR")))
     D.verify_document(out, f"{MD5}\n{SHA1}")
     assert {r["valor"] for r in _rows(out / "iocs.csv")} == {MD5, SHA1} and _rows(out / "candidatos_ocr.csv") == []
+
+
+# --- PDF-a.4: estado y trabajo en segundo plano ------------------------------------------------------------------
+
+def test_run_job_deja_el_estado_final(tmp_path):
+    out = tmp_path / "doc"
+    assert D.read_state(out) == {} and D.run_job(_text_pdf(tmp_path), out) == "done"
+    assert D.read_state(out)["state"] == "done" and (out / "manifest.json").is_file()
+
+
+def test_run_job_con_pdf_danado_queda_failed_con_motivo_y_no_propaga(tmp_path):
+    bad = tmp_path / "roto.pdf"
+    bad.write_bytes(b"esto no es un pdf")
+    out = tmp_path / "doc"
+    assert D.run_job(bad, out) == "failed"
+    st = D.read_state(out)
+    assert st["state"] == "failed" and st["error"]
+    assert D.run_job(tmp_path / "no_existe.pdf", tmp_path / "otro") == "failed"
+
+
+def test_estado_danado_se_informa_en_lugar_de_romper(tmp_path):
+    (tmp_path / "doc").mkdir()
+    (tmp_path / "doc" / D.STATE_FILE).write_text("{no es json", encoding="utf-8")
+    assert D.read_state(tmp_path / "doc")["state"] == "failed"
+
+
+@needs_tesseract
+def test_pdf_raster_termina_en_needs_attention_y_verificar_lo_deja_en_done(tmp_path):
+    out = tmp_path / "doc"
+    assert D.run_job(_table_pdf(tmp_path, [("MD5", MD5, (28, 4)), ("SHA-1", SHA1, (28, 12))]), out) == "needs_attention"
+    D.verify_document(out, f"{MD5}\n{SHA1}")
+    assert D.read_state(out)["state"] == "done"

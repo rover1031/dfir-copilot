@@ -593,6 +593,10 @@ def _evidence_rows(project: Project) -> list[dict]:
         else:
             origin = "—"
         st = project.status(f.case_id) or {}
+        if f.kind == "document":  # los documentos guardan su estado junto a sus resultados, no en status/
+            from dfir_copilot.web.document_views import document_state
+
+            st = document_state(project, f)
         state = st.get("state")
         rows.append({"file": f, "kind_label": _KIND_LABEL.get(f.kind, f.kind), "sha": e.get("sha256"), "origin": origin,
                      "by": e.get("analyst"), "at": e.get("at_utc"), "state": state, "state_label": _STATE_LABEL.get(state, "en cola")})
@@ -612,6 +616,10 @@ def _start_new(project: Project) -> None:
     for f in project.files():
         if f.supported and project.status(f.case_id) is None and not sv.runner.running(project.id, f.case_id):
             sv.runner.submit(project, f, sv.deps)
+    # PDF: los documentos también se analizan solos al entrar, en la misma cola
+    from dfir_copilot.web.document_views import start_documents  # import tardío: ese módulo importa estas vistas
+
+    start_documents(project)
 
 
 def _open_evidence_project(pid: str) -> Project:

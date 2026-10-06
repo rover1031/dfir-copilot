@@ -132,6 +132,47 @@ def analyze_to_dir(pdf_path: str | Path, out_dir: str | Path, reference_text: st
     return manifest
 
 
+STATE_FILE = "estado.json"                # estado del trabajo (running | done | needs_attention | failed); la interfaz lo lee de aquí
+
+
+def write_state(out_dir: str | Path, state: str, **extra) -> None:
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    _write_json(out / STATE_FILE, {"state": state, "at_utc": _now(), **extra})
+
+
+def read_state(out_dir: str | Path) -> dict:
+    path = Path(out_dir) / STATE_FILE
+    try:
+        return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    except (OSError, json.JSONDecodeError):
+        return {"state": "failed", "error": "El archivo de estado del documento está dañado: vuelve a analizarlo."}
+
+
+def final_state(out_dir: str | Path) -> str:
+    """`needs_attention` si queda algo por revisar (hashes sin verificar o elementos dudosos); si no, `done`."""
+    summary = json.loads((Path(out_dir) / "resumen.json").read_text(encoding="utf-8"))
+    return "needs_attention" if summary["hashes_sin_verificar"] or summary["estadisticas"]["dudosos"] else "done"
+
+
+def run_job(pdf_path: str | Path, out_dir: str | Path, geo=None, ocr: str = "auto") -> str:
+    """El trabajo completo de un documento, con su estado: lo lanza el ejecutor en segundo plano. Un error nunca tumba el servidor:
+    queda en el estado `failed` con su motivo, para mostrarlo y poder reintentar."""
+    out = Path(out_dir)
+    write_state(out, "running")
+    try:
+        analyze_to_dir(pdf_path, out, geo=geo, ocr=ocr)
+        state = final_state(out)
+    except DocumentError as exc:
+        write_state(out, "failed", error=str(exc)[:500])
+        return "failed"
+    except Exception as exc:  # noqa: BLE001 - PDF dañado, cifrado, etc.: se informa, no se propaga
+        write_state(out, "failed", error=f"{type(exc).__name__}: {exc}"[:500])
+        return "failed"
+    write_state(out, state)
+    return state
+
+
 def load(out_dir: str | Path) -> dict:
     """Resultado guardado: manifest, resumen, texto de las páginas y extracción."""
     out = Path(out_dir)
@@ -161,4 +202,5 @@ def verify_document(out_dir: str | Path, reference_text: str, geo=None) -> dict:
     manifest["reference"] = {"sha256": hashlib.sha256(reference_text.encode("utf-8")).hexdigest(), "chars": len(reference_text),
                              "applied_utc": _now()}
     _publish(out, ex, data["pages"], manifest, report, geo)
+    write_state(out, final_state(out))
     return report

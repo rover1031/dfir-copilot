@@ -1,0 +1,50 @@
+<div id="doc" {% if running %}hx-get="{{ base }}" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
+{% if flash %}<div class="msg {{ flash.0 }}">{{ flash.1 }}</div>{% endif %}
+<div class="card"><h3>{{ source.name }} <span class="chip chip-{{ state }}">{{ state_label }}</span></h3>
+{% if running %}<p>⏳ Analizando el documento… Una página con texto tarda segundos; una tabla de hashes leída por OCR, cerca de un minuto. Esta pantalla se actualiza sola.</p>
+{% elif state == "failed" %}<div class="msg error">{{ error }}</div>
+<form hx-post="{{ base }}reanalizar/" hx-target="#doc" hx-swap="outerHTML">{% csrf_token %}<button class="btn" type="submit">Reintentar el análisis</button></form>
+{% elif not ready %}<p class="muted">{% if error %}{{ error }}{% else %}Este documento aún no se ha analizado.{% endif %}</p>
+<form hx-post="{{ base }}reanalizar/" hx-target="#doc" hx-swap="outerHTML">{% csrf_token %}<button class="btn" type="submit">Analizar ahora</button></form>
+{% else %}<p class="hint">{{ manifest.pages }} página(s) · lectura: {% for m, n in manifest.methods.items %}{{ n }} {{ m }}{% if not forloop.last %}, {% endif %}{% endfor %} · idioma probable: {{ summary.idioma }} · SHA-256 <code title="{{ manifest.source.sha256 }}">{{ manifest.source.sha256|slice:":16" }}…</code></p>
+{% for a in summary.avisos %}<div class="msg info">{{ a }}</div>{% endfor %}{% endif %}
+</div>
+{% if ready %}
+<div class="card"><h3>Qué contiene</h3>
+{% if by_kind %}<table><tr><th>Tipo de indicador</th><th>Únicos</th></tr>{% for label, n in by_kind %}<tr><td>{{ label }}</td><td>{{ n }}</td></tr>{% endfor %}</table>
+<p class="hint">{{ stats.menciones_totales }} mención(es) en total · {{ stats.ips_publicas }} IP(s) pública(s).</p>
+{% else %}<p class="muted">No se encontró ningún indicador (IP, dominio, URL, hash, correo, CVE). Si el documento es un escaneo, revisa los avisos.</p>{% endif %}
+{% if stats.top_por_menciones %}<h4>Los más mencionados</h4><table><tr><th>Tipo</th><th>Valor</th><th>Menciones</th></tr>
+{% for kind, value, n in stats.top_por_menciones %}<tr><td>{{ kind }}</td><td><code>{{ value }}</code></td><td>{{ n }}</td></tr>{% endfor %}</table>{% endif %}
+{% if countries %}<h4>País de las IP públicas</h4><table><tr><th>País</th><th>IPs únicas</th><th>Menciones</th></tr>
+{% for country, ips, n in countries %}<tr><td>{{ country }}</td><td>{{ ips }}</td><td>{{ n }}</td></tr>{% endfor %}</table>
+<p class="hint">Geolocalización local; un país por IP es una aproximación (VPN, nubes, proxies).</p>
+{% elif summary.paises_nota %}<p class="muted">{{ summary.paises_nota }}</p>{% endif %}</div>
+{% if summary.resumen_extractivo %}<div class="card"><h3>Resumen extractivo</h3>
+<p class="hint">Frases centrales del documento, en su orden y con su página. Lo calcula el código, sin modelo.</p>
+<ul>{% for page, sentence in summary.resumen_extractivo %}<li><strong>p.{{ page }}</strong> {{ sentence }}</li>{% endfor %}</ul></div>{% endif %}
+<div class="card"><h3>IOCs para controles ({{ n_blocklist }})</h3>
+<p class="hint">Sin IPs privadas, sin servicios conocidos y sin hashes leídos por OCR que no estén verificados. Revísalos antes de cargarlos como lista de bloqueo.</p>
+{% if blocklist %}<table><tr><th>Tipo</th><th>Valor</th><th>Menciones</th><th>Páginas</th><th>Etiquetas</th></tr>
+{% for r in blocklist %}<tr><td>{{ r.tipo }}</td><td><code>{{ r.valor }}</code></td><td>{{ r.menciones }}</td><td>{{ r.paginas }}</td><td><small>{{ r.etiquetas }}</small></td></tr>{% endfor %}</table>
+{% if n_blocklist > blocklist|length %}<p class="hint">Se muestran {{ blocklist|length }} de {{ n_blocklist }}; el CSV trae todos.</p>{% endif %}
+{% else %}<p class="muted">Ninguno todavía.</p>{% endif %}
+<p class="row"><a class="btn" href="{{ base }}descargar/iocs.csv/">Descargar iocs.csv</a> <a class="btn" href="{{ base }}descargar/resumen.json/">resumen.json</a> <a class="btn" href="{{ base }}descargar/manifest.json/">manifest.json</a></p></div>
+{% if candidates %}<div class="card"><h3>Hashes leídos por OCR, sin verificar ({{ candidates|length }})</h3>
+<p class="hint">Un carácter mal leído (p. ej. un 0 como e) no se detecta por la longitud: estos hashes NO están en la lista de bloqueo hasta contrastarlos con una fuente de texto.</p>
+<table><tr><th>Tipo</th><th>Valor leído</th><th>Páginas</th></tr>{% for r in candidates %}<tr><td>{{ r.tipo }}</td><td><code>{{ r.valor }}</code></td><td>{{ r.paginas }}</td></tr>{% endfor %}</table>
+<p class="row"><a class="btn" href="{{ base }}descargar/candidatos_ocr.csv/">Descargar candidatos_ocr.csv</a></p></div>{% endif %}
+{% if doubtful %}<div class="card"><h3>Dudosos ({{ n_doubtful }})</h3>
+<p class="hint">Se parecen a un indicador pero no cuadran (hash truncado o mal leído, fila partida entre páginas). No entran a ninguna lista.</p>
+<table><tr><th>Página</th><th>Motivo</th><th>Longitud</th><th>Texto</th></tr>{% for d in doubtful %}<tr><td>{{ d.page }}</td><td>{{ d.reason }}</td><td>{{ d.length }}</td><td><code>{{ d.text|truncatechars:70 }}</code></td></tr>{% endfor %}</table>
+<p class="row"><a class="btn" href="{{ base }}descargar/dudosos.csv/">Descargar dudosos.csv</a></p></div>{% endif %}
+{% if candidates or doubtful %}<div class="card"><h3>Verificar contra una fuente de texto</h3>
+<p class="hint">Pega el texto de la página web del boletín (o su tabla de IOCs). Un hash que coincide queda verificado; si difiere en pocos caracteres y solo se parece a uno de la fuente, se corrige y queda registrado. No se repite el OCR.</p>
+<form hx-post="{{ base }}verificar/" hx-target="#doc" hx-swap="outerHTML">{% csrf_token %}
+<textarea name="referencia" rows="6" style="width:100%" placeholder="Pega aquí el texto de referencia…"></textarea>
+<p class="row"><button class="btn" type="submit">Verificar</button></p></form></div>{% endif %}
+{% if reference %}<div class="card"><h3>Fuente de referencia aplicada</h3>
+<p class="hint">{{ reference.applied_utc }} · {{ reference.chars }} caracteres · SHA-256 <code>{{ reference.sha256|slice:":16" }}…</code>{% if verification %} · verificados {{ verification.verificados }}, corregidos {{ verification.corregidos|length }}, sin confirmar {{ verification.sin_confirmar }}, hashes de la fuente que no están en el documento: {{ verification.en_la_fuente_y_no_en_el_documento|length }}{% endif %}</p></div>{% endif %}
+<div class="card"><form hx-post="{{ base }}reanalizar/" hx-target="#doc" hx-swap="outerHTML" hx-confirm="¿Volver a analizar el documento? Se repite la lectura y el OCR.">{% csrf_token %}<button class="btn" type="submit">Volver a analizar</button></form></div>
+{% endif %}
+</div>

@@ -43,3 +43,8 @@ urlpatterns = [
 for route, view, name in CASE_ROUTES:
     urlpatterns.append(path(f"proyectos/<str:pid>/casos/<str:cid>/{route}", view, name=f"project_{name}"))
     urlpatterns.append(path(f"casos/<str:cid>/{route}", view, {"pid": None}, name=name))
+
+# PDF: pantalla de análisis de documentos
+from dfir_copilot.web.document_views import urlpatterns as _document_urls  # noqa: E402
+
+urlpatterns += _document_urls

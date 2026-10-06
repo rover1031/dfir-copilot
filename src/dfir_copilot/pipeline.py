@@ -373,6 +373,28 @@ class PipelineRunner:
             self._pool.submit(job)
         return True
 
+    def submit_task(self, project_id: str, case_id: str, fn) -> bool:
+        """Lanza una tarea cualquiera (p. ej. el análisis de un documento PDF) con el mismo control de «en curso» y la misma cola que
+        los logs: un archivo a la vez, y `running()` la ve, así que la interfaz sigue mostrando «analizando…» sin cambios."""
+        key = (project_id, case_id)
+        with self._lock:
+            if key in self._running:
+                return False
+            self._running.add(key)
+
+        def job():
+            try:
+                fn()
+            finally:
+                with self._lock:
+                    self._running.discard(key)
+
+        if self.sync:
+            job()
+        else:
+            self._pool.submit(job)
+        return True
+
 
 __all__ = ["STEPS", "STEP_STATUS", "TRIAGE_QUESTION", "Deps", "Pipeline", "PipelineRunner", "default_deps", "llm_status",
            "new_status", "run_pipeline"]
