@@ -12,3 +12,4 @@ __pycache__/
 reports/diagnostico-*.md
 .env.*
 !.env.example
+reports/
