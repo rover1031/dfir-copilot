@@ -4,6 +4,8 @@ Generado desde el historial de git con `python3 tools/changelog.py`. Lo más rec
 
 ## 2026-10-06
 
+- La web arranca como servicio; README para cualquier usuario; CONTRIBUTING; Dockerfile con uid configurable y .dockerignore (`129026b`)
+- Documentación de entrega: README, demo con datos sintéticos, capacidades, instalación, guía de evaluación y changelog; uid del contenedor configurable (`be7d873`)
 - Licencia MIT; reports/ fuera del repositorio; ejemplo del informe IDOR en docs/ejemplos (`63ba47a`)
 - Protección extra: .env.* fuera del repositorio (`17a00dd`)
 - Tests: claves falsas marcadas como FAKE y comprobaciones de no filtración apuntando al valor actual (`06b2e06`)
