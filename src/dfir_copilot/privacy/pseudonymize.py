@@ -31,6 +31,7 @@ from pathlib import Path
 
 import duckdb
 
+from dfir_copilot.endpoint_sql import basename_sql, cmd_flags_sql
 from dfir_copilot.ingest.ingestor import sha256_file
 
 POLICY_VERSION = "priv-1"
@@ -67,7 +68,11 @@ DEFAULT_RULES = {
     # extensión de red: puertos, protocolo, acción, regla, aplicación y bytes no identifican a nadie: vocabulario técnico (se pueden pasar
     # a alias con PrivacyPolicy(overrides={"rule_name": "alias"})); la IP de destino sí es un dato y va como alias con su alcance y red
     "src_port": ("keep", None), "dst_port": ("keep", None), "protocol": ("keep", None), "action": ("keep", None),
-    "rule_name": ("keep", None), "application": ("keep", None), "bytes_in": ("keep", None), "session_id": ("alias", "S"), "host": ("alias", "H"),
+    "rule_name": ("keep", None), "application": ("keep", None), "bytes_in": ("keep", None),
+    # endpoint: rutas y líneas de comandos pueden llevar usuarios, equipos o secretos -> alias, más una columna derivada que conserva
+    # lo útil sin revelarlo: el nombre del ejecutable (`<col>_base`) o señales técnicas de la línea de comandos (`<col>_flags`)
+    "process_name": ("path", "PROC"), "parent_process": ("path", "PPROC"), "file_path": ("path", "FILE"),
+    "command_line": ("cmd", "CMD"), "event_type": ("keep", None), "process_id": ("keep", None), "file_hash": ("keep", None), "session_id": ("alias", "S"), "host": ("alias", "H"),
     "referer": ("alias", "REF"), "query_string": ("mask_values", None), "endpoint": ("mask_ids", None),
     "user_agent": ("scrub", None),
 }
@@ -209,6 +214,9 @@ def build_pseudonymized(parquet: str | Path, manifest: dict, out_dir: str | Path
             kind, prefix = policy.treatment(col, dtype)
             if col in empty and kind != "keep":
                 kind = "keep"  # columna sin datos: no hay nada que ocultar
+            derived = None
+            if kind in ("path", "cmd"):  # alias + una columna derivada (ver endpoint_sql)
+                derived, kind = kind, "alias"
             treatments[col] = kind
             c = _q(col)
             if kind == "keep":
@@ -252,6 +260,10 @@ def build_pseudonymized(parquet: str | Path, manifest: dict, out_dir: str | Path
                                  f"LEFT JOIN __nets{i} ON __ipinfo{i}.net = __nets{i}.net")
                     select.append(f"__ipinfo{i}.scope AS {_q(col + '_scope')}")
                     select.append(f"__nets{i}.alias AS {_q(col + '_net')}")
+                if derived == "path":  # el nombre del ejecutable, sin la ruta (que puede llevar el usuario)
+                    select.append(f"{basename_sql('src.' + c)} AS {_q(col + '_base')}")
+                elif derived == "cmd":  # señales técnicas de la línea de comandos, sin su contenido
+                    select.append(f"{cmd_flags_sql('src.' + c)} AS {_q(col + '_flags')}")
             elif kind == "shift":
                 (low,) = con.execute(f"SELECT min({c}) FROM src").fetchone()
                 low = low if low is not None else 0

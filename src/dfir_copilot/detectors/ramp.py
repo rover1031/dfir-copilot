@@ -12,7 +12,7 @@ def _q(name: str) -> str:
 
 @register
 class ActivityRamp(Detector):
-    applies_to = ("web", "network")
+    applies_to = ("web", "network", "endpoint")
     name = "activity_ramp"
     description = "Actores cuya actividad en el último tercio del periodo supera con creces la del primer tercio."
 

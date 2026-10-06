@@ -201,7 +201,7 @@ class VolumeOutlier(Detector):
 @register
 class Beaconing(Detector):
     name = "beaconing"
-    applies_to = ("network",)
+    applies_to = ("network", "endpoint")  # un EDR también ve las conexiones de red de cada equipo
     description = "Conexiones periódicas y regulares de un origen hacia un mismo destino externo (posible baliza de comando y control)."
 
     def __init__(self, min_events: int = 12, min_gap_s: float = 5.0, max_gap_s: float = 7200.0, max_cv: float = 0.15):

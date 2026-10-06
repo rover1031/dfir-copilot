@@ -21,12 +21,12 @@ import yaml
 from dfir_copilot.i18n import t
 from dfir_copilot.profiling.readers import SourceError, leaf_exprs, open_source, relation_sql
 from dfir_copilot.profiling.semantics import es_to_en_months
-from dfir_copilot.schema import CANONICAL_FIELDS, NETWORK_FIELDS, SCHEMAS
+from dfir_copilot.schema import CANONICAL_FIELDS, ENDPOINT_FIELDS, NETWORK_FIELDS, SCHEMAS
 
 MAPPINGS_DIR = Path(__file__).parent / "mappings"
 _IDENT = re.compile(r"^[a-z_][a-z0-9_]*$")
 _TYPES = {"VARCHAR", "BIGINT", "INTEGER", "SMALLINT", "DOUBLE"}
-_SCHEMA = {f.name: f.dtype for f in (*CANONICAL_FIELDS, *NETWORK_FIELDS)}
+_SCHEMA = {f.name: f.dtype for f in (*CANONICAL_FIELDS, *NETWORK_FIELDS, *ENDPOINT_FIELDS)}
 _SPECIAL_INPUTS = {"timestamp", "uri", "request_line"}  # entradas que no son campos canónicos directos
 _ROLES = ("actor", "resource")  # qué columna es quién actúa y sobre qué (ver detectors/roles.py)
 FORMATS = ("auto", "csv", "tsv", "json", "parquet")
@@ -194,6 +194,9 @@ def _validate(m: dict) -> None:
         for need in ("src_ip", "dst_ip"):
             if need not in fields:
                 raise ValueError(f"Un mapping de red (schema: network) necesita '{need}' en fields")
+    elif kind == "endpoint":
+        if "host" not in fields or not ({"process_name", "event_type"} & set(fields)):
+            raise ValueError("Un mapping de endpoint (schema: endpoint) necesita 'host' y 'process_name' o 'event_type' en fields")
     elif "uri" not in fields and "endpoint" not in fields and "request_line" not in fields:
         raise ValueError("fields debe incluir 'uri' o 'endpoint' (o 'request_line', la petición HTTP completa)")
     for canon in fields:
@@ -370,7 +373,7 @@ def build_query(m: dict, rel: str, leaves: dict) -> str:
         else:
             expr = f"CAST(NULL AS {fld.dtype})"
         items.append(f"{expr} AS {_q(n)}")
-    for fld in NETWORK_FIELDS:  # solo las que el mapping aporta: un log web no gana columnas
+    for fld in (*NETWORK_FIELDS, *ENDPOINT_FIELDS):  # solo las que el mapping aporta: un log web no gana columnas
         if fld.name in base:
             items.append(f"{_q(fld.name)} AS {_q(fld.name)}")
     items.append("timestamp_raw")

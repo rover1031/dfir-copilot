@@ -155,7 +155,7 @@ command_line:
 parent_process:
   domain: endpoint
   description: {es: Proceso padre, en: Parent process}
-  aliases: [parent_process, parent_image, parent_process_name, process_parent_name, parent_base_file_name,
+  aliases: [process_parent_executable, parent_image_file_name, parent_process, parent_image, parent_process_name, process_parent_name, parent_base_file_name,
             parent_name, proceso_padre, padre]
 
 process_id:

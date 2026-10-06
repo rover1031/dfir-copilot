@@ -1,5 +1,12 @@
 """Detectores como plugins. Importar este paquete registra los detectores disponibles."""
-from dfir_copilot.detectors import automation, breadth, cluster, network, ramp  # noqa: F401  (registran detectores)
+from dfir_copilot.detectors import (  # noqa: F401  (registran detectores)
+    automation,
+    breadth,
+    cluster,
+    endpoint,
+    network,
+    ramp,
+)
 from dfir_copilot.detectors.base import (  # noqa: F401
     Detector,
     DetectorRun,

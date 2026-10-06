@@ -45,4 +45,16 @@ NETWORK_FIELDS: tuple[Field, ...] = (
     Field("bytes_in", "BIGINT", "Bytes recibidos por el origen, si existen"),
 )
 NETWORK_NAMES: tuple[str, ...] = tuple(f.name for f in NETWORK_FIELDS)
-SCHEMAS = ("web", "network")  # tipos de log que el ingestor sabe normalizar
+# Extensión de endpoint (EDR: CrowdStrike Falcon, Sysmon...). Como la de red, solo aparece si el mapping declara `schema: endpoint`. Un
+# evento de conexión de red de un endpoint usa además las columnas de red (src_ip = IP local del equipo, dst_ip, puertos, protocolo).
+ENDPOINT_FIELDS: tuple[Field, ...] = (
+    Field("event_type", "VARCHAR", "Tipo de evento del EDR (p. ej. ProcessRollup2, NetworkConnectIP4, Sysmon 1/3)"),
+    Field("process_name", "VARCHAR", "Proceso: ejecutable (con o sin ruta)"),
+    Field("command_line", "VARCHAR", "Línea de comandos del proceso"),
+    Field("parent_process", "VARCHAR", "Proceso padre"),
+    Field("process_id", "VARCHAR", "Identificador del proceso"),
+    Field("file_path", "VARCHAR", "Ruta de archivo afectado"),
+    Field("file_hash", "VARCHAR", "Hash del ejecutable o archivo (SHA-256 si lo hay)"),
+)
+ENDPOINT_NAMES: tuple[str, ...] = tuple(f.name for f in ENDPOINT_FIELDS)
+SCHEMAS = ("web", "network", "endpoint")  # tipos de log que el ingestor sabe normalizar

@@ -10,7 +10,7 @@ def _q(name: str) -> str:
 
 @register
 class ResourceBreadth(Detector):
-    applies_to = ("web", "network")
+    applies_to = ("web", "network", "endpoint")
     name = "resource_breadth"
     description = (
         "Actores que acceden a muchos más recursos distintos que sus pares "

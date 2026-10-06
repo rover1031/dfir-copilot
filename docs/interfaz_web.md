@@ -139,3 +139,8 @@ El perfil de ingeniero de datos del caso (campos, IPs por alcance, eventos por d
 * «Elegir del servidor» solo muestra la **carpeta de entrada** (`<raíz de datos>/inbox`, o `DFIR_INBOX_ROOT`), no las carpetas internas.
 * La página del análisis muestra los **tokens gastados por cada caso** (interpretación del perfil más los turnos del agente), leídos del ledger.
 * Logs de texto: ver `docs/logs_texto.md`.
+
+## Reiniciar la interfaz
+
+`python -m dfir_copilot.web --host 0.0.0.0 --restart` detiene la interfaz que siga corriendo (de una ejecución anterior) y espera a que el
+puerto quede libre antes de arrancar. Usa /proc, así que funciona en el contenedor aunque no tenga `pkill`.

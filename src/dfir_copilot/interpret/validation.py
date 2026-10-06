@@ -28,7 +28,14 @@ from dfir_copilot.engine.query_engine import QueryEngine, QueryRejected, QueryTi
 from dfir_copilot.interpret.schemas import MAX_QUERIES, MAX_QUESTIONS, ProfileInterpretation
 from dfir_copilot.profiling.data_profile import DataProfile
 from dfir_copilot.profiling.schema_mapper import SchemaMapper
-from dfir_copilot.schema import CANONICAL_FIELDS, CANONICAL_NAMES, NETWORK_FIELDS, NETWORK_NAMES
+from dfir_copilot.schema import (
+    CANONICAL_FIELDS,
+    CANONICAL_NAMES,
+    ENDPOINT_FIELDS,
+    ENDPOINT_NAMES,
+    NETWORK_FIELDS,
+    NETWORK_NAMES,
+)
 
 # Tipos admitidos para columnas derivadas: el nombre del tipo termina dentro de un CAST, así que va en lista cerrada.
 ALLOWED_DTYPES = frozenset({
@@ -63,13 +70,13 @@ def columns_from_profile(profile: DataProfile, derived: Mapping[str, str] | None
     Se restringe a lo mapeado a propósito: el Parquet real trae TODAS las columnas canónicas, pero las no mapeadas van vacías;
     una consulta sobre ellas debe fallar aquí y no devolver un vacío silencioso en la investigación.
     """
-    dtypes = {f.name: f.dtype for f in (*CANONICAL_FIELDS, *NETWORK_FIELDS)} | {n: dt for n, (dt, _) in EXTRA_COLUMNS.items()}
+    dtypes = {f.name: f.dtype for f in (*CANONICAL_FIELDS, *NETWORK_FIELDS, *ENDPOINT_FIELDS)} | {n: dt for n, (dt, _) in EXTRA_COLUMNS.items()}
     wanted = {"source_row"}
     if profile.timestamp is not None:
         wanted |= set(TABLE_COLUMNS["timestamp"])
     for m in profile.mapping:
         wanted |= set(TABLE_COLUMNS.get(m.canonical, (m.canonical,)))
-    columns = {name: dtypes[name] for name in (*CANONICAL_NAMES, *NETWORK_NAMES, *EXTRA_COLUMNS) if name in wanted}
+    columns = {name: dtypes[name] for name in (*CANONICAL_NAMES, *NETWORK_NAMES, *ENDPOINT_NAMES, *EXTRA_COLUMNS) if name in wanted}
     if local_timezone and "timestamp_utc" in columns:
         columns[LOCAL_COLUMN] = "TIMESTAMP"
     for name, dtype in (derived or {}).items():

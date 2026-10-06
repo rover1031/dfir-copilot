@@ -199,13 +199,14 @@ def _edr_events(n=60):
              "process.pid": str(500 + i), "SHA256HashData": f"{i:064x}", "MD5HashData": f"{i:032x}"} for i in range(n)]
 
 
-def test_telemetria_edr_no_es_ingerible_y_explica_por_que(tmp_path):
+def test_telemetria_edr_se_ingiere_con_el_esquema_de_endpoint(tmp_path):
+    """Antes de la entrega D1 no era ingerible; ahora tiene su esquema (equipo, proceso, línea de comandos, hash...)."""
     f = tmp_path / "export.json"
     f.write_text(json.dumps(_edr_events()), encoding="utf-8")
     draft = inspect_source(f, lang="es")
-    assert draft.status == "unsupported" and "unsupported_log_type" in codes(draft)
-    assert any("esquema canónico" in d.message for d in draft.decisions)
-    assert "unsupported_fields" in codes(draft)  # sí reconoció proceso, hash, etc.; no hay dónde ponerlos todavía
+    assert draft.status == "ready" and draft.log_type == "edr" and draft.mapping["schema"] == "endpoint"
+    assert {"host", "process_name", "command_line", "parent_process", "file_hash", "process_id"} <= set(draft.mapping["fields"])
+    assert draft.mapping["roles"]["actor"] == "host" and "unsupported_log_type" not in codes(draft)
 
 
 def test_fecha_ambigua_bloquea_hasta_que_el_analista_decida(tmp_path):
