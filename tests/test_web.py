@@ -475,3 +475,38 @@ def test_confirmar_la_zona_desde_el_caso(tmp_path, monkeypatch):
     assert "reingestar" in bad
     ok = c.post(case + "zona/", {"timezone": "America/Santiago", "basis": "analyst_decision", "analyst": "eder"}).content.decode()
     assert "registrada como: decisión del analista, sin confirmación externa" in ok and "(eder," in ok
+
+
+# --- conversación: análisis automático en curso, propuestas pendientes e hilo roto ------------------------------------------
+
+def test_la_pestana_preguntar_avisa_de_las_propuestas_pendientes_del_triaje(env):
+    client, _, _ = env                                                           # el triaje automático dejó una aprobación pendiente
+    page = client.get(CASE + "tab/preguntar/").content.decode()
+    assert "esperando tu decisión" in page
+    r = client.post(CASE + "preguntar/", {"question": "¿Algo más?"})
+    assert r.status_code == 409 and "Hipótesis" in r.content.decode()
+
+
+def test_mientras_corre_el_analisis_automatico_no_se_pregunta_ni_se_decide(env, monkeypatch):
+    client, sv, _ = env
+    monkeypatch.setattr(sv.runner, "running", lambda pid, cid: True)
+    assert "sigue en curso" in client.get(CASE + "tab/preguntar/").content.decode()
+    for url, data in ((CASE + "preguntar/", {"question": "¿Algo?"}), (CASE + "decidir/", {"decision": "approve", "note": "ok"})):
+        r = client.post(url, data)
+        assert r.status_code == 409 and "sigue en curso" in r.content.decode()
+
+
+def test_un_hilo_roto_muestra_el_error_y_se_puede_reiniciar_sin_perder_nada(env, monkeypatch):
+    from dfir_copilot.agent.graph import DfirAgent
+
+    client, sv, _ = env
+    with monkeypatch.context() as m:                                                # solo este bloque ve el hilo "roto"
+        m.setattr(DfirAgent, "phase", lambda self, thread_id="default": "crashed")
+        page = client.get(CASE + "tab/preguntar/").content.decode()
+        assert "quedó a medias" in page and "Reiniciar conversación" in page and "reset()" not in page
+        r = client.post(CASE + "preguntar/", {"question": "¿Algo?"})
+        assert r.status_code == 409 and "Reiniciar conversación" in r.content.decode()
+    ws = Project.open("analisis-1").workspace("analisis-1--three-months")
+    before = len(ws.ledger(ws.engine()).entries())
+    assert "Conversación reiniciada" in client.post(CASE + "reiniciar/").content.decode()
+    assert len(ws.ledger(ws.engine()).entries()) == before and ws.verify().ok              # el ledger no se toca

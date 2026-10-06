@@ -1,3 +1,8 @@
+{% if flash %}<div class="msg {{ flash.0 }}">{{ flash.1 }}</div>{% endif %}
+{% if auto_running %}<div class="msg info">El análisis automático de este caso sigue en curso (el triaje con el modelo). Espera a que termine para preguntar o decidir; la página del proyecto muestra el avance.</div>{% endif %}
+{% if phase == "crashed" %}<div class="msg error">La conversación quedó a medias por un error anterior{% if last_error %}: <code>{{ last_error }}</code>{% endif %}.
+<form hx-post="{{ base }}reiniciar/" hx-target="#tab" hx-swap="innerHTML" style="margin-top:6px">{% csrf_token %}<button class="danger" type="submit">Reiniciar conversación</button>
+<small> No se pierden hipótesis, notas ni el ledger.</small></form></div>{% endif %}
 <div class="card">
 <p class="hint">Presupuesto: {{ budget.case_used }} tokens gastados en el caso · tope por pregunta {{ budget.per_question }}{% if budget.case_limit %} · tope del caso {{ budget.case_limit }}{% endif %}.
 Lo que escribas se traduce a alias antes de llegar al modelo y verás exactamente lo enviado.</p>
@@ -5,7 +10,7 @@ Lo que escribas se traduce a alias antes de llegar al modelo y verás exactament
 <form hx-post="{{ base }}preguntar/" hx-target="#job-area" hx-swap="innerHTML">{% csrf_token %}<input type="hidden" name="reveal" value="{% if reveal %}1{% else %}0{% endif %}">
 <label>Pregunta en lenguaje natural</label><textarea name="question" required placeholder="¿Hay cuentas con actividad anómala? ¿Qué hizo U-0032 en diciembre?"></textarea>
 <label>Cifras que NO son identificadores <small>(opcional, separadas por comas: se envían tal cual)</small></label><input type="text" name="literal">
-<p class="row"><button type="submit" {% if not model_ok %}disabled{% endif %}>Preguntar</button><span class="spin">enviando…</span>
+<p class="row"><button type="submit" {% if not model_ok or auto_running or phase != "idle" %}disabled{% endif %}>Preguntar</button><span class="spin">enviando…</span>
 {% if not model_ok %}<small class="muted">No hay un modelo configurado: define la clave de API en el .env y reinicia la interfaz.</small>{% endif %}</p></form></div>
 <div class="card"><h3>Conversación</h3>
 {% for t in turns %}<div style="padding:8px 0;border-bottom:1px solid var(--line)"><small class="muted">{{ t.ts }} · {{ t.tokens }} tokens{% if t.cut_by %} · cortada por {{ t.cut_by }}{% endif %} · {{ t.status }}</small>

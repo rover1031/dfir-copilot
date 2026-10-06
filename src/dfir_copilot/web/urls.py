@@ -14,6 +14,7 @@ CASE_ROUTES = [
     ("informe/exportar/", views.export, "case_export"),
     ("informe/descargar/<str:filename>/", views.download, "case_download"),
     ("zona/", views.timezone_confirm, "case_timezone"),
+    ("reiniciar/", views.reset_conversation, "case_reset"),
 ]
 
 urlpatterns = [

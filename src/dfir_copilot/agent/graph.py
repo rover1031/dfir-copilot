@@ -428,6 +428,10 @@ class DfirAgent:
     def _snapshot(self, thread_id: str):
         return self.graph.get_state(self._config(thread_id))
 
+    def phase(self, thread_id: str = "default") -> str:
+        """Estado del hilo para la interfaz: idle | awaiting_approval | crashed."""
+        return self._phase(thread_id)
+
     def _phase(self, thread_id: str) -> str:
         """idle | awaiting_approval | crashed (la ejecución anterior terminó en error a mitad del grafo)."""
         if not self._snapshot(thread_id).next:

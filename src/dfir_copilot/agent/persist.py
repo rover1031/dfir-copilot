@@ -20,9 +20,15 @@ import json
 import os
 import threading
 from collections import defaultdict
+from contextlib import contextmanager
 from pathlib import Path
 
 from langgraph.checkpoint.memory import InMemorySaver
+
+try:  # bloqueo entre procesos (en Windows sin WSL no existe: queda el bloqueo entre hilos)
+    import fcntl
+except ImportError:  # pragma: no cover
+    fcntl = None
 
 FORMAT_VERSION = 1
 
@@ -44,7 +50,13 @@ def _unb(text: str) -> bytes:
 
 
 class FileCheckpointer(InMemorySaver):
-    """`InMemorySaver` que se vuelca a un archivo JSON tras cada cambio y se recarga al abrirse."""
+    """`InMemorySaver` que se vuelca a un archivo JSON tras cada cambio.
+
+    Coherente entre instancias: el triaje automático y la interfaz web abren cada uno su propio guardado sobre el MISMO archivo. Antes
+    de leer, cada instancia comprueba si otra cambió el archivo (inodo, fecha y tamaño: cada volcado es un reemplazo atómico, así que
+    cambia el inodo) y lo recarga; cada escritura toma un bloqueo de archivo y relee lo último antes de aplicar su cambio. Así nadie
+    trabaja con una foto vieja ni pisa lo que otra instancia guardó.
+    """
 
     def __init__(self, path: str | Path, **kwargs):
         super().__init__(**kwargs)
@@ -54,35 +66,86 @@ class FileCheckpointer(InMemorySaver):
         self.path = Path(path)
         self._lock = threading.RLock()
         self._meta: dict[str, dict] = {}
+        self._stamp = None
         if self.path.exists():
+            self._stamp = self._file_stamp()
             self._load()
+
+    # --- coherencia entre instancias -------------------------------------------------------------------------------
+    def _file_stamp(self):
+        try:
+            st = self.path.stat()
+        except FileNotFoundError:
+            return None
+        return (st.st_ino, st.st_mtime_ns, st.st_size)
+
+    def _refresh(self) -> None:
+        """Si el archivo cambió desde nuestra última lectura o escritura (otra instancia u otro proceso), se recarga."""
+        stamp = self._file_stamp()
+        if stamp == self._stamp:
+            return
+        self.storage.clear()
+        self.writes.clear()
+        self.blobs.clear()
+        self._meta = {}
+        if stamp is not None:
+            self._load()
+        self._stamp = stamp
+
+    @contextmanager
+    def _exclusive(self):
+        """Escritura: bloqueo entre hilos y entre procesos, y releer lo último antes de cambiar nada."""
+        with self._lock:
+            lock_path = self.path.with_suffix(self.path.suffix + ".lock")
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(lock_path, "a", encoding="utf-8") as fh:
+                if fcntl:
+                    fcntl.flock(fh, fcntl.LOCK_EX)
+                self._refresh()
+                yield
+
+    # --- lecturas: siempre sobre lo último guardado ------------------------------------------------------------------
+    def get_tuple(self, config):
+        with self._lock:
+            self._refresh()
+            return super().get_tuple(config)
+
+    def list(self, *args, **kwargs):
+        with self._lock:
+            self._refresh()
+            items = [*super().list(*args, **kwargs)]
+        yield from items
 
     # --- metadatos por hilo ---------------------------------------------------------------------------------
     def get_meta(self, thread_id: str) -> dict | None:
-        return self._meta.get(thread_id)
+        with self._lock:
+            self._refresh()
+            return self._meta.get(thread_id)
 
     def set_meta(self, thread_id: str, **fields) -> None:
-        with self._lock:
+        with self._exclusive():
             self._meta[thread_id] = {**self._meta.get(thread_id, {}), **fields}
             self._flush()
 
     def threads(self) -> list[str]:
-        return sorted({*self.storage, *self._meta})
+        with self._lock:
+            self._refresh()
+            return sorted({*self.storage, *self._meta})
 
     # --- mutaciones: se guardan siempre ------------------------------------------------------------------------
     def put(self, *args, **kwargs):
-        with self._lock:
+        with self._exclusive():
             out = super().put(*args, **kwargs)
             self._flush()
             return out
 
     def put_writes(self, *args, **kwargs):
-        with self._lock:
+        with self._exclusive():
             super().put_writes(*args, **kwargs)
             self._flush()
 
     def delete_thread(self, thread_id: str) -> None:
-        with self._lock:
+        with self._exclusive():
             super().delete_thread(thread_id)
             self._meta.pop(thread_id, None)
             self._flush()
@@ -90,7 +153,7 @@ class FileCheckpointer(InMemorySaver):
     # --- compactar ----------------------------------------------------------------------------------------------
     def compact(self, thread_id: str) -> None:
         """Deja solo el último punto de cada espacio de nombres del hilo, con sus escrituras pendientes y los datos que usa."""
-        with self._lock:
+        with self._exclusive():
             for ns, checkpoints in list(self.storage.get(thread_id, {}).items()):
                 if len(checkpoints) <= 1:
                     continue
@@ -120,6 +183,7 @@ class FileCheckpointer(InMemorySaver):
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
         os.replace(tmp, self.path)  # escritura atómica: nunca queda un archivo a medias
+        self._stamp = self._file_stamp()  # lo que hay en disco es justo lo que tenemos en memoria
 
     def _load(self) -> None:
         try:

@@ -161,3 +161,26 @@ def test_el_caso_guarda_el_hilo_en_su_carpeta_sin_alterar_la_custodia(tmp_path, 
     assert ws.verify().ok
     again = build_agent(pseudo, ws.ledger(), scripted([say("otra")]), checkpointer=ws.checkpointer())
     assert again.threads()[0]["continuable"] is True
+
+
+# --- dos instancias sobre el mismo caso (la interfaz abierta mientras el triaje automático corre en segundo plano) ----------
+
+def test_la_interfaz_abierta_antes_del_triaje_ve_lo_que_el_triaje_dejo_pendiente(setup):
+    """Regresión: la interfaz leía el guardado UNA vez; si el caso se abría con el triaje en marcha, se quedaba con una foto vieja,
+    no veía las propuestas por aprobar y declaraba el hilo 'a medias'."""
+    boot, _, _ = setup
+    web, _, _ = boot([say("respuesta")])                                                 # la interfaz abre el caso primero
+    pipe, _, _ = boot(FULL())                                                            # el triaje corre en otra instancia
+    r = pipe.ask("Triaje inicial")
+    assert r.status == "needs_approval"
+    assert web.pending() == r.approvals and web._phase("default") == "awaiting_approval"
+
+
+def test_una_instancia_con_una_foto_vieja_no_pisa_lo_que_guardo_otra(setup):
+    boot, _, _ = setup
+    web, _, _ = boot([say("respuesta")])                                                 # foto tomada antes del triaje
+    pipe, _, _ = boot(FULL())
+    r = pipe.ask("Triaje inicial")
+    web.reset("otro-hilo")                                                               # la instancia vieja escribe algo
+    later, _, _ = boot([say("x")])
+    assert later.pending() == r.approvals                                                # y aun así la aprobación pendiente sigue en disco

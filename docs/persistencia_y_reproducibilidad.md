@@ -46,3 +46,13 @@ en el octavo puesto) devuelve **otras filas en cada ejecución**. Medido con Duc
 Los cuatro estados de una consulta en el replay quedan así: **coincide**, **`skipped`** (falta el motor de su copia),
 **`schema_drift`** (un `DESCRIBE` cambió porque cambió la vista) y **`nondeterministic`** (no reproducible por sí misma);
 `mismatches` queda reservado a lo que de verdad no coincide.
+
+## Varias instancias sobre el mismo caso
+
+El triaje automático (en segundo plano) y la interfaz web abren cada uno su propio agente sobre la misma conversación guardada
+(`agent/threads.json` del caso). El guardado es coherente entre instancias: antes de leer, cada una comprueba si otra cambió el archivo
+(inodo, fecha y tamaño; cada volcado es un reemplazo atómico) y lo recarga; cada escritura toma un bloqueo de archivo y relee lo último
+antes de aplicar su cambio. Antes de esto, abrir un caso con el triaje en marcha dejaba a la interfaz con una foto vieja: no veía las
+propuestas por aprobar y declaraba el hilo «a medias». Además, mientras el análisis automático de un caso sigue corriendo, la interfaz
+no deja preguntar ni decidir (serían dos agentes sobre la misma conversación), y si un hilo sí queda roto, muestra el error real y un
+botón **Reiniciar conversación** que no toca hipótesis, notas ni el ledger.

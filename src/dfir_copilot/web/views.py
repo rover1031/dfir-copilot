@@ -206,12 +206,23 @@ def _tab_hipotesis(ctx, b, reveal):
     return {"items": items, "pending": [_approval(r, v) for r in b.agent.pending()], "model_ok": b.model_ok}
 
 
+def _auto_running(ctx) -> bool:
+    """¿El análisis automático (con su triaje) sigue corriendo para este caso? Mientras tanto no se pregunta ni se decide: serían
+    dos agentes sobre la misma conversación."""
+    return bool(ctx.project and get_services().runner.running(ctx.project.id, ctx.ws.case_id))
+
+
+def _last_error(b) -> str | None:
+    errors = [e["data"].get("error") for e in b.ledger.entries("agent_turn") if e["data"].get("status") == "error"]
+    return errors[-1] if errors else None
+
+
 def _tab_preguntar(ctx, b, reveal):
     v = _shower(b, reveal)
     turns = [{"ts": e["ts_utc"], "question": v(e["data"].get("question") or ""), "answer": v(e["data"].get("answer") or ""),
               "tokens": e["data"].get("tokens_delta", e["data"].get("tokens")), "cut_by": e["data"].get("cut_by"),
               "status": e["data"]["status"]} for e in b.ledger.entries("agent_turn")][-12:]
-    return {"turns": turns, "budget": b.agent.budget(), "model_ok": b.model_ok, "pending": len(b.agent.pending())}
+    return {"phase": b.agent.phase(), "last_error": _last_error(b), "auto_running": _auto_running(ctx), "turns": turns, "budget": b.agent.budget(), "model_ok": b.model_ok, "pending": len(b.agent.pending())}
 
 
 def _tab_notas(ctx, b, reveal):
@@ -278,6 +289,12 @@ def _job_view(ctx, job, reveal):
     return {"result": result}
 
 
+_RUNNING_MSG = ("El análisis automático de este caso sigue en curso (el triaje con el modelo). Espera a que termine: la página del "
+                "proyecto muestra el avance.")
+_CRASHED_MSG = ("La conversación quedó a medias por un error anterior. Pulsa «Reiniciar conversación» en la pestaña Preguntar: no se "
+                "pierden hipótesis, notas ni el ledger.")
+
+
 @require_POST
 def ask(request, pid, cid):
     ctx = _ctx(pid, cid)
@@ -285,6 +302,13 @@ def ask(request, pid, cid):
     question = (request.POST.get("question") or "").strip()
     if not question:
         return _msg(request, "Escribe una pregunta.", status=400)
+    if _auto_running(ctx):
+        return _msg(request, _RUNNING_MSG, status=409)
+    phase = b.agent.phase()
+    if phase == "crashed":
+        return _msg(request, _CRASHED_MSG, status=409)
+    if phase == "awaiting_approval":
+        return _msg(request, "Hay propuestas del agente esperando tu decisión: apruébalas o recházalas en la pestaña Hipótesis.", status=409)
     if not b.model_ok:
         return _msg(request, "No hay un modelo configurado: define la clave de API en el .env y reinicia la interfaz.", status=409)
     literal = _literals(request)
@@ -306,6 +330,8 @@ def decide(request, pid, cid):
     decision, note = request.POST.get("decision"), (request.POST.get("note") or "").strip()
     if decision not in ("approve", "reject"):
         return _msg(request, "Decisión no válida.", status=400)
+    if _auto_running(ctx):
+        return _msg(request, _RUNNING_MSG, status=409)
     if not b.model_ok:
         return _msg(request, "Aprobar o rechazar reanuda al agente, que necesita el modelo: configura la clave de API.", status=409)
     if not b.agent.pending():
@@ -542,3 +568,14 @@ def timezone_confirm(request, pid, cid):
         return _render_tab(request, ctx, "resumen", ("error", str(exc)))
     return _render_tab(request, ctx, "resumen", ("ok", f"Zona {data['timezone']} registrada como: {data['basis_text']}. "
                                                        "No cambia ningún dato; queda en el ledger y el informe lo dirá así."))
+
+
+@require_POST
+def reset_conversation(request, pid, cid):
+    """Descarta la conversación con el agente (no toca hipótesis, notas ni el ledger) para poder volver a preguntar."""
+    ctx = _ctx(pid, cid)
+    b = _bundle(ctx)
+    if _auto_running(ctx):
+        return _render_tab(request, ctx, "preguntar", ("error", _RUNNING_MSG))
+    b.agent.reset()
+    return _render_tab(request, ctx, "preguntar", ("ok", "Conversación reiniciada. Las hipótesis, las notas y el ledger siguen intactos."))
