@@ -1,0 +1,7 @@
+<p class="row">{% for s in sources %}<span class="src src-{{ s.css }}" title="{{ s.file }} · SHA-256 {{ s.sha }}">{{ s.label }} · {{ s.file }}</span>{% endfor %}
+<small class="muted">{% if not reveal %}Valores en alias (cada fuente con su diccionario).{% endif %}</small></p>
+<div class="card"><table><tr><th>Severidad</th><th>Fuente</th><th>Detector</th><th>Entidad</th><th>Resumen</th></tr>
+{% for f in rows %}<tr><td><span class="sev sev-{{ f.severity }}">{{ f.severity }}</span></td>
+<td><a class="src src-{{ f.source.css }}" href="/proyectos/{{ project.id }}/casos/{{ f.source.case_id }}/" title="{{ f.source.file }}">{{ f.source.label }}</a></td>
+<td>{{ f.detector }}</td><td><code>{{ f.entity }}</code></td><td>{{ f.summary }}<br><small class="muted"><code>{{ f.finding_id }}</code></small></td></tr>
+{% empty %}<tr><td colspan="5" class="muted">Ninguna fuente tiene hallazgos todavía.</td></tr>{% endfor %}</table></div>

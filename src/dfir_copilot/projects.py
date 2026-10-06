@@ -84,11 +84,12 @@ class ProjectSettings:
     use_llm: bool = True               # etapas con modelo (interpretación y triaje). Sin esto el análisis es 100 % local
     max_tokens: int = 210_000          # tope por pregunta del agente
     max_tokens_case: int | None = None  # tope acumulado por caso (opcional)
+    max_tokens_incident: int | None = None  # tope acumulado de TODO el análisis (todas sus fuentes), opcional
 
     def __post_init__(self):
         if self.language not in LANGUAGES:
             raise ProjectError(f"Idioma no soportado: {self.language!r} (usa {LANGUAGES})")
-        for name in ("max_tokens", "max_tokens_case"):
+        for name in ("max_tokens", "max_tokens_case", "max_tokens_incident"):
             v = getattr(self, name)
             if v is not None and (isinstance(v, bool) or not isinstance(v, int) or v < 1):
                 raise ProjectError(f"{name} debe ser un entero positivo")

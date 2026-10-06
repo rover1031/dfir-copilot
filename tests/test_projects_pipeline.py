@@ -313,3 +313,12 @@ def test_un_archivo_que_antes_no_se_soportaba_se_analiza_entero_al_reanalizar(tm
     assert steps["draft"] in ("done", "needs_attention") and steps["ingest"] in ("done", "needs_attention"), st
     assert steps["copy"] == "done" and steps["detectors"] == "done" and st["state"] in ("done", "needs_attention")
     assert project.workspace(project.files()[0].case_id).meta["dataset"]
+
+
+def test_al_reanudar_la_interpretacion_reconstruye_el_borrador_en_vez_de_saltarse(base):
+    """Regresión: si `draft` ya estaba hecho, `interpret` decía «sin borrador en memoria»; ahora lo reconstruye del archivo."""
+    project = make_project(base, use_llm=True)
+    first = run_pipeline(project, csv_of(project), Deps(agent_llm=None, structured_llm=None))
+    assert first["steps"]["interpret"]["status"] == "skipped" and first["steps"]["draft"]["status"] in ("done", "needs_attention")
+    st = run_pipeline(project, csv_of(project), Deps(agent_llm=None, structured_llm=lambda: Scripted(ok())))
+    assert st["steps"]["interpret"]["status"] == "done" and "sin borrador" not in st["steps"]["interpret"]["message"]

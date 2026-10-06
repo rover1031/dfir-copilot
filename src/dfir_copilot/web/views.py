@@ -184,7 +184,10 @@ def project_page(request, pid):
     ok, msg = get_services().model_status()
     reveal = _reveal(request)
     error = project.dir / "correlacion_error.txt"
+    from dfir_copilot import incident
+
     return render(request, "web/project.html", {"project": project, "rows": rows, "running": running, "settings": project.settings,
+                                                 "tokens": incident.tokens(project),
                                                  "llm_ok": ok, "llm_msg": msg, "reveal": reveal, "corr": _correlation_view(project, reveal),
                                                  "corr_error": error.read_text(encoding="utf-8") if error.exists() else None,
                                                  "n_ingested": sum(1 for r in rows if r["has_case"])})
@@ -299,6 +302,12 @@ def _tab_datos(ctx, b, reveal):
     return {"profile": prof, "qa_examples": EXAMPLES, "outdated": prof.get("profile_version", 1) < PROFILE_VERSION}
 
 
+def _incident_over(project) -> bool:
+    from dfir_copilot.incident import over_budget
+
+    return over_budget(project)
+
+
 def _auto_running(ctx) -> bool:
     """¿El análisis automático (con su triaje) sigue corriendo para este caso? Mientras tanto no se pregunta ni se decide: serían
     dos agentes sobre la misma conversación."""
@@ -397,6 +406,9 @@ def ask(request, pid, cid):
         return _msg(request, "Escribe una pregunta.", status=400)
     if _auto_running(ctx):
         return _msg(request, _RUNNING_MSG, status=409)
+    if ctx.project and _incident_over(ctx.project):
+        return _msg(request, "Se alcanzó el tope de tokens del incidente (todas sus fuentes). Súbelo en los ajustes del análisis o sigue "
+                             "con las preguntas rápidas sin modelo de la pestaña Datos.", status=409)
     phase = b.agent.phase()
     if phase == "crashed":
         return _msg(request, _CRASHED_MSG, status=409)
@@ -552,8 +564,10 @@ def analysis_new(request):
                 "analyst": p.get("analyst", ""), "language": p.get("language", "es"), "timezone": p.get("timezone", ""),
                 "use_llm": p.get("use_llm") == "on", "max_tokens": p.get("max_tokens") or 210000}
         try:
+            cap = (request.POST.get("max_tokens_incident") or "").strip()
             settings = ProjectSettings(language=form["language"], timezone=form["timezone"].strip() or None,
-                                       analyst=form["analyst"].strip() or None, use_llm=form["use_llm"], max_tokens=int(form["max_tokens"]))
+                                       analyst=form["analyst"].strip() or None, use_llm=form["use_llm"], max_tokens=int(form["max_tokens"]),
+                                       max_tokens_incident=int(cap) if cap else None)
             project = Project.create(form["name"], None, settings, ticket=form["ticket"], description=form["description"])
         except (ProjectError, ValueError) as exc:
             return render(request, "web/analysis_new.html", {"form": form, "error": str(exc), "zones": COMMON_ZONES}, status=400)
@@ -763,3 +777,41 @@ def data_question(request, pid, cid):
     a.text = v(a.text)
     a.rows = [[v(x) if isinstance(x, str) else x for x in row] for row in a.rows]
     return render(request, "web/_data_answer.html", {"a": a, "context": json.dumps(a.context or context or {})})
+
+
+# --- vista del incidente: hallazgos de todas las fuentes y línea de tiempo, siempre con su procedencia ---------------------------
+
+def _source_shower(src: dict, reveal: bool):
+    if not reveal:
+        return lambda x: x
+    _, ps = src["ws"].pseudonymized()
+    return ps.reveal_any
+
+
+@require_GET
+def incident_findings(request, pid):
+    from dfir_copilot import incident
+
+    project = _open_project(pid)
+    reveal = _reveal(request)
+    srcs = incident.sources(project)
+    shows = {s["case_id"]: _source_shower(s, reveal) for s in srcs}
+    rows = [{**f, "entity": shows[f["source"]["case_id"]](f["entity"]), "summary": shows[f["source"]["case_id"]](f["summary"])}
+            for f in incident.findings(srcs)]
+    return render(request, "web/_incident_findings.html", {"project": project, "rows": rows, "sources": srcs, "reveal": reveal})
+
+
+@require_GET
+def incident_timeline(request, pid):
+    from dfir_copilot import incident
+
+    project = _open_project(pid)
+    reveal = _reveal(request)
+    srcs = incident.sources(project)
+    shows = {s["case_id"]: _source_shower(s, reveal) for s in srcs}
+    events = incident.timeline(project, srcs)
+    for e in events:
+        cid = (e["source"] or {}).get("case_id")
+        if cid in shows:
+            e["text"] = shows[cid](e["text"])
+    return render(request, "web/_incident_timeline.html", {"project": project, "events": events, "reveal": reveal})

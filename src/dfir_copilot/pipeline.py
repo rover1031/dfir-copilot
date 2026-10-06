@@ -160,17 +160,19 @@ class Pipeline:
         self._save()
 
     # --- etapas -------------------------------------------------------------------------------------------------------
+    def _inspect(self):
+        from dfir_copilot.profiling import inspect_source
+
+        s = self.settings
+        note = f"Declarada al crear el proyecto '{self.project.id}'" + (f" por {s.analyst}" if s.analyst else "")
+        return inspect_source(self.source.path, lang=s.language, timezone=s.timezone, timezone_note=note if s.timezone else None)
+
     def _step_draft(self):
         if not self.source.supported:
             raise _Stop("unsupported", f"formato de archivo no soportado: {self.source.name} (se admiten csv, tsv, json, ndjson y parquet)")
         if self.ws.meta.get("dataset"):
             return "done", "el caso ya está ingerido"
-        from dfir_copilot.profiling import inspect_source
-
-        s = self.settings
-        note = f"Declarada al crear el proyecto '{self.project.id}'" + (f" por {s.analyst}" if s.analyst else "")
-        self._draft = inspect_source(self.source.path, lang=s.language, timezone=s.timezone,
-                                     timezone_note=note if s.timezone else None)
+        self._draft = self._inspect()
         self.p1.mkdir(parents=True, exist_ok=True)
         self._draft.save(self.p1 / "mapping_borrador.yaml")
         if self._draft.status == "unsupported":
@@ -184,11 +186,12 @@ class Pipeline:
     def _step_interpret(self):
         if not self.settings.use_llm:
             return "skipped", "el proyecto no usa el modelo"
-        if self._draft is None:
-            return "skipped", ("ya estaba ingerido: la interpretación solo se hace antes de ingerir"
-                               if self.ws.meta.get("dataset") else "sin borrador en memoria: vuelve a analizar el archivo")
         if not self.deps.structured_llm:
             return "skipped", "no hay modelo configurado"
+        if over_incident_budget(self.project):
+            return "skipped", "tope de tokens del incidente alcanzado"
+        if self._draft is None:  # reanudación: la etapa draft ya estaba hecha; el borrador se reconstruye del archivo (local, sin modelo)
+            self._draft = self._inspect()
         from dfir_copilot.agent.llm import LLMConfigError
         from dfir_copilot.interpret import interpret_profile, result_to_dict
 
@@ -282,6 +285,8 @@ class Pipeline:
             return "skipped", "el proyecto no usa el modelo"
         if not self.deps.agent_llm:
             return "skipped", "no hay modelo configurado"
+        if over_incident_budget(self.project):
+            return "skipped", "tope de tokens del incidente alcanzado"
         from dfir_copilot.agent.graph import build_agent
         from dfir_copilot.agent.llm import LLMConfigError
 
@@ -307,6 +312,12 @@ def run_pipeline(project: Project, source: SourceFile, deps: Deps | None = None,
                  on_update: Callable[[dict], None] | None = None) -> dict:
     """Ejecuta (o reanuda) el análisis de un archivo y devuelve su estado."""
     return Pipeline(project, source, deps, on_update).run()
+
+
+def over_incident_budget(project: Project) -> bool:
+    from dfir_copilot.incident import over_budget
+
+    return over_budget(project)
 
 
 def correlate_after(project: Project) -> None:

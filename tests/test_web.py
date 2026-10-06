@@ -600,3 +600,38 @@ def test_la_pagina_del_analisis_muestra_la_correlacion_en_alias(tmp_path, monkey
     real = c.get("/proyectos/firewall-octubre/?reveal=1").content.decode()
     assert et.beacon_host in real
     assert c.post("/proyectos/firewall-octubre/correlacion/").status_code == 302
+
+
+# --- vista del incidente --------------------------------------------------------------------------------------------------
+
+def test_la_vista_del_incidente_muestra_hallazgos_y_linea_de_tiempo_con_procedencia(tmp_path, monkeypatch):
+    from dfir_copilot.synthetic_endpoint import make_endpoint_dataset, write_endpoint
+    from dfir_copilot.synthetic_firewall import make_firewall_dataset, write_firewall
+
+    _, inbox = make_env(tmp_path, monkeypatch, model=False)
+    fw, ft = make_firewall_dataset(hosts=12, days=31)
+    edr, et = make_endpoint_dataset(fw, ft)
+    write_firewall(fw, inbox / "firewall.csv", "paloalto")
+    write_endpoint(edr, inbox / "falcon.csv", "falcon_csv")
+    c = Client()
+    wizard(c, timezone="", max_tokens_incident="50000")
+    c.post("/proyectos/firewall-octubre/archivos/servidor/agregar/", {"paths": ["analisis1/firewall.csv", "analisis1/falcon.csv"], "modo": "copy"})
+    page = c.get("/proyectos/firewall-octubre/").content.decode()
+    assert "Incidente" in page and "Fuentes de evidencia" in page and "tope 50000" in page
+    found = c.get("/proyectos/firewall-octubre/incidente/hallazgos/").content.decode()
+    assert "src-network" in found and "src-endpoint" in found and "lolbin_network" in found and et.beacon_host not in found
+    tl = c.get("/proyectos/firewall-octubre/incidente/linea-de-tiempo/").content.decode()
+    assert "⏱" in tl and "correlación" in tl and et.beacon_host not in tl
+    assert et.beacon_host in c.get("/proyectos/firewall-octubre/incidente/linea-de-tiempo/?reveal=1").content.decode()
+
+
+def test_el_tope_del_incidente_bloquea_preguntar(env):
+    import json
+
+    client, _, _ = env
+    p = Project.open("analisis-1")
+    meta = json.loads(p.meta_path.read_text())
+    meta["settings"]["max_tokens_incident"] = 1                                    # el triaje simulado ya gastó más que esto
+    p.meta_path.write_text(json.dumps(meta))
+    r = client.post(CASE + "preguntar/", {"question": "¿Algo?"})
+    assert r.status_code == 409 and "tope de tokens del incidente" in r.content.decode()

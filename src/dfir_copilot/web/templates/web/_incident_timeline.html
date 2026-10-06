@@ -1,0 +1,5 @@
+<p class="hint">Horas en UTC. Las marcadas ⏱ están corregidas con el desfase de relojes estimado por la correlación. {% if not reveal %}Valores en alias.{% endif %}</p>
+<div class="timeline">{% for e in events %}<div class="tl-item tl-{{ e.kind }}"><div class="tl-time">{{ e.ts }}{% if e.corrected %} <span title="hora corregida con el desfase de relojes">⏱</span>{% endif %}</div>
+<div class="tl-body">{% if e.source %}<span class="src src-{{ e.source.css }}" title="{{ e.source.file }}">{{ e.source.label }}</span>{% endif %}
+<span class="tl-kind">{{ e.kind }}</span>{% if e.severity %} <span class="sev sev-{{ e.severity }}">{{ e.severity }}</span>{% endif %}<div>{{ e.text }}</div></div></div>
+{% empty %}<p class="muted">Todavía no hay eventos.</p>{% endfor %}</div>

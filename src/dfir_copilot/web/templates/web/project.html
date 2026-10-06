@@ -4,7 +4,14 @@
 {% if project.description %}<p>{{ project.description }}</p>{% endif %}
 <p class="muted">{% if project.mode == "evidence" %}Evidencia{% else %}Carpeta{% endif %}: <code>{{ project.source_dir }}</code> · idioma {{ settings.language }} · zona {{ settings.timezone|default:"sin declarar (UTC)" }} · modelo: {% if settings.use_llm %}{% if llm_ok %}sí{% else %}sí, pero no configurado{% endif %}{% else %}no{% endif %}</p>
 <div class="row">{% if project.mode == "evidence" %}<a class="btn" href="/proyectos/{{ project.id }}/archivos/">Archivos y custodia</a>{% endif %}<form hx-post="/proyectos/{{ project.id }}/analizar/todos/" hx-target="#files" hx-swap="outerHTML">{% csrf_token %}<button class="secondary" type="submit">Analizar / reanudar todo</button></form></div>
+{% if tokens.total or tokens.cap %}<p class="row"><span class="tokens {% if tokens.cap and tokens.pct >= 100 %}over{% elif tokens.cap and tokens.pct >= 80 %}near{% endif %}">🪙 {{ tokens.total }} tokens en el incidente{% if tokens.cap %} · tope {{ tokens.cap }} ({{ tokens.pct }} %){% endif %}</span>
+{% for t in tokens.per_source %}<small class="muted">{{ t.file }}: {{ t.tokens }}</small>{% endfor %}</p>{% endif %}
+<h2>Fuentes de evidencia</h2>
 {% include "web/_project_files.html" %}
+{% if n_ingested %}<h2>🧭 Incidente <small class="muted">· todas las fuentes juntas, cada dato con su procedencia</small></h2>
+<nav class="tabs" id="itabs"><a class="on" hx-get="/proyectos/{{ project.id }}/incidente/hallazgos/?reveal={% if reveal %}1{% else %}0{% endif %}" hx-target="#itab" onclick="document.querySelectorAll('#itabs a').forEach(a=>a.classList.remove('on'));this.classList.add('on')">Hallazgos</a>
+<a hx-get="/proyectos/{{ project.id }}/incidente/linea-de-tiempo/?reveal={% if reveal %}1{% else %}0{% endif %}" hx-target="#itab" onclick="document.querySelectorAll('#itabs a').forEach(a=>a.classList.remove('on'));this.classList.add('on')">Línea de tiempo</a></nav>
+<div id="itab" hx-get="/proyectos/{{ project.id }}/incidente/hallazgos/?reveal={% if reveal %}1{% else %}0{% endif %}" hx-trigger="load"><span class="muted">Cargando…</span></div>{% endif %}
 {% if n_ingested >= 2 or corr %}<div class="row" style="margin-top:22px"><h2>🔗 Correlación entre fuentes</h2>
 <span class="right row"><a class="btn secondary" href="?reveal={% if reveal %}0{% else %}1{% endif %}">{% if reveal %}Ocultar valores reales{% else %}Mostrar valores reales{% endif %}</a>
 <form method="post" action="/proyectos/{{ project.id }}/correlacion/">{% csrf_token %}<button class="secondary" type="submit">Recalcular</button></form></span></div>

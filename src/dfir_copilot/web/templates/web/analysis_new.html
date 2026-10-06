@@ -13,6 +13,8 @@
 <small>Vacía: se asume UTC y queda «sin verificar». Si el dato trae su propia zona, se usa la del dato.</small></div>
 <div><label>Idioma del informe</label><select name="language"><option value="es" {% if form.language == "es" %}selected{% endif %}>Español</option><option value="en" {% if form.language == "en" %}selected{% endif %}>English</option></select></div>
 <div><label>Tope de tokens por pregunta</label><input type="number" name="max_tokens" value="{{ form.max_tokens }}" min="1000"></div>
+<div><label>Tope de tokens del incidente</label><input type="number" name="max_tokens_incident" value="" min="1000" placeholder="sin tope (opcional)">
+<small>Suma de todas las fuentes del análisis. Al alcanzarlo, el modelo deja de usarse; lo local sigue funcionando.</small></div>
 </div>
 <label>Descripción</label><textarea name="description" placeholder="Qué se investiga y por qué (opcional)">{{ form.description }}</textarea>
 <label class="inline"><input type="checkbox" name="use_llm" {% if form.use_llm %}checked{% endif %}> Usar el modelo (interpretación del perfil y triaje del agente; gasta API). Sin marcar, el análisis es 100 % local.</label>
