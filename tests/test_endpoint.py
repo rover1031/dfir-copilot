@@ -97,3 +97,26 @@ def test_un_mapping_de_endpoint_exige_equipo_y_proceso(world):
     del mapping["fields"]["host"]
     with pytest.raises(ValueError, match="host"):
         _validate(mapping)
+
+
+def _texto_base(world, col):
+    """Lo que el informe compartible puede mostrar de una columna de proceso: sus valores `_base` (el ejecutable, sin ruta)."""
+    ws = world[4]["falcon_csv"][1]
+    pseudo, ps = ws.pseudonymized()
+    rows = pseudo.query(f"SELECT DISTINCT {col}_base FROM logs WHERE {col}_base IS NOT NULL", max_rows=100000).rows
+    return ps, " ".join(str(v) for (v,) in rows)
+
+
+def test_el_escaneo_de_fugas_no_bloquea_el_ejecutable_suelto_de_falcon(world):
+    from dfir_copilot.privacy.pseudonymize import real_hits
+
+    for col in ("process_name", "parent_process"):
+        ps, text = _texto_base(world, col)
+        assert text, col
+        assert real_hits(ps, text) == [], col
+
+
+def test_sin_la_excepcion_el_proceso_padre_de_falcon_si_se_marcaria(world):
+    """Prueba de que la excepción hace falta: find_real a secas marca el padre cuando Falcon lo entrega como nombre suelto."""
+    ps, text = _texto_base(world, "parent_process")
+    assert any(h["column"] == "parent_process" for h in ps.find_real(text))
