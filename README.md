@@ -52,10 +52,10 @@ Al terminar quedan **dos servicios en marcha** (compruébalo con `docker compose
 | `web` | **http://127.0.0.1:8000** | La interfaz: análisis, casos, documentos, papelera |
 | `lab` | **http://127.0.0.1:8888** | Jupyter, con los cuadernos de cada fase |
 
-**Entrar en Jupyter:** pide el enlace con su token y ábrelo tal cual:
+**Entrar en Jupyter:** abre http://127.0.0.1:8888 y pega el token, o pide el enlace completo (el comando cambia el nombre interno del contenedor por `127.0.0.1`):
 
 ```bash
-docker compose exec lab jupyter server list
+docker compose exec lab jupyter server list | sed -E 's#http://[^/]+:8888#http://127.0.0.1:8888#'
 ```
 
 El token es `JUPYTER_TOKEN` de tu `.env` (por defecto `cambia-este-token`; cámbialo si quieres). Si el navegador da un error de
@@ -136,7 +136,7 @@ cp tools/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
 | `Permission denied` al crear análisis | `data/` quedó de root: `sudo chown -R $(id -u):$(id -g) data` y reconstruye con `DFIR_UID=$(id -u) docker compose up -d --build` |
 | La web no responde en 127.0.0.1:8000 | Mira su registro con `docker compose logs --tail 50 web` y reiníciala con `docker compose restart web`. Desde WSL, `curl -sI http://127.0.0.1:8000/` debe dar `200`; si responde ahí pero no en el navegador de Windows, prueba `http://localhost:8000` |
 | `port is already allocated` | Otra instancia usa el puerto 8000 u 8888: detenla (`docker compose down` en su carpeta) antes de levantar esta |
-| No puedo entrar en Jupyter | Usa el enlace de `docker compose exec lab jupyter server list`, en una ventana privada del navegador |
+| No puedo entrar en Jupyter | Abre http://127.0.0.1:8888 con el token de tu `.env`, no la dirección con el nombre interno del contenedor que imprime `jupyter server list`; si da error de `_xsrf`, usa una ventana privada del navegador |
 | «No hay un modelo configurado» | Normal sin clave; pon la clave en `.env` y `docker compose up -d --force-recreate` |
 | Un PDF escaneado no da hashes en la lista de bloqueo | Es intencionado: lo leído por OCR queda «sin verificar» hasta contrastarlo con una fuente de texto (ver [docs/documentos.md](docs/documentos.md)) |
 
