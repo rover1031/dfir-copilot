@@ -1,0 +1,21 @@
+{% extends "web/base.html" %}
+{% block title %}Eliminar {{ name }} · DFIR Co-pilot{% endblock %}
+{% block content %}
+<p><a href="/">← Análisis</a></p>
+<h1>Eliminar {{ kind }} «{{ name }}»</h1>
+{% if error %}<div class="msg error">{{ error }}</div>{% endif %}
+<div class="card">
+<p>Se moverá a la <strong>papelera</strong>: desaparece de la lista, pero se puede <strong>restaurar</strong> tal cual hasta que la vacíes o lo elimines definitivamente.</p>
+<table><tr><th>Identificador</th><td><code>{{ id }}</code></td></tr>
+<tr><th>Archivos</th><td>{{ files }}</td></tr><tr><th>Tamaño</th><td>{{ bytes|filesizeformat }}</td></tr>
+{% if custody %}<tr><th>Cadena de custodia</th><td>{{ custody.records }} registro(s) · {% if custody.ok %}íntegra{% else %}<strong>con problemas</strong>: {{ custody.problems|join:"; " }}{% endif %}</td></tr>{% endif %}
+</table>
+{% if source_dir %}<div class="msg info">Este análisis vincula la carpeta del servidor <code>{{ source_dir }}</code>: esa carpeta <strong>no se toca</strong>. Solo se mueven los datos del análisis.</div>{% endif %}
+<p class="hint">Quedará constancia en el registro de eliminaciones: quién, cuándo, qué archivos y con qué SHA-256, y el último hash de su custodia. Los informes exportados de sus casos viajan con él.</p>
+</div>
+<form class="card" method="post" action="{{ action }}">{% csrf_token %}
+<label>Para confirmar, escribe <code>{{ id }}</code></label><input type="text" name="confirmacion" autocomplete="off" required>
+<label>Quién elimina <small>(opcional; queda en el registro)</small></label><input type="text" name="analista" value="{{ analyst }}">
+<p class="row"><button class="danger" type="submit">Mover a la papelera</button> <a class="btn" href="/">Cancelar</a></p>
+</form>
+{% endblock %}

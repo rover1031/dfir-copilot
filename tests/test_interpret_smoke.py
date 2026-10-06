@@ -188,7 +188,7 @@ def test_la_clave_se_muestra_enmascarada_nunca_completa(capsys, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-FAKE-pruebas-1234")
     main(["datos.csv", "--yes"], inspector=inspector(), llm_factory=factory(Scripted(ok())))
     out = capsys.readouterr().out
-    assert "clave=…1234" in out and "sk-ant-secreta" not in out
+    assert "clave=…1234" in out and "sk-ant-FAKE" not in out
 
 
 def test_el_timeout_de_la_linea_de_comandos_pisa_al_de_la_configuracion(capsys):

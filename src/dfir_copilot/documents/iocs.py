@@ -27,13 +27,10 @@ KIND_ORDER = ("sha256", "sha1", "md5", "ip", "url", "domain", "onion", "email", 
 
 # TLD aceptados: genéricos y países habituales. No incluye los que chocan con extensiones de archivo (.sh .py .pl .rs .md .ps .zip .mov).
 TLDS = frozenset(
-    "com net org info biz edu gov mil int io co xyz top site online shop club app dev cloud tech store live icu vip work link click "
-    "ac ae ar at au be bg br by ca ch cl cn cz de dk do ec ee es eu fi fr gb gr hk hr hu id ie il in ir is it jp kr kz lt lu lv mx my "
-    "nl no nz pa pe ph pk pt ro ru se sg si sk th tr tw ua uk us uy ve vn za cc tv me gg ly to ws su pw tk ml ga cf gq cx la".split())
+    ["com", "net", "org", "info", "biz", "edu", "gov", "mil", "int", "io", "co", "xyz", "top", "site", "online", "shop", "club", "app", "dev", "cloud", "tech", "store", "live", "icu", "vip", "work", "link", "click", "ac", "ae", "ar", "at", "au", "be", "bg", "br", "by", "ca", "ch", "cl", "cn", "cz", "de", "dk", "do", "ec", "ee", "es", "eu", "fi", "fr", "gb", "gr", "hk", "hr", "hu", "id", "ie", "il", "in", "ir", "is", "it", "jp", "kr", "kz", "lt", "lu", "lv", "mx", "my", "nl", "no", "nz", "pa", "pe", "ph", "pk", "pt", "ro", "ru", "se", "sg", "si", "sk", "th", "tr", "tw", "ua", "uk", "us", "uy", "ve", "vn", "za", "cc", "tv", "me", "gg", "ly", "to", "ws", "su", "pw", "tk", "ml", "ga", "cf", "gq", "cx", "la"])
 
 KNOWN_SERVICES = frozenset(
-    "x.com twitter.com torproject.org google.com microsoft.com github.com youtube.com facebook.com linkedin.com wikipedia.org "
-    "mitre.org virustotal.com cisa.gov nist.gov sophos.com fortinet.com crowdstrike.com paloaltonetworks.com".split())
+    ["x.com", "twitter.com", "torproject.org", "google.com", "microsoft.com", "github.com", "youtube.com", "facebook.com", "linkedin.com", "wikipedia.org", "mitre.org", "virustotal.com", "cisa.gov", "nist.gov", "sophos.com", "fortinet.com", "crowdstrike.com", "paloaltonetworks.com"])
 
 _REFANG = (
     (re.compile(r"hxxp", re.I), "http"),

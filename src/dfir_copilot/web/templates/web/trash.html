@@ -1,0 +1,22 @@
+{% extends "web/base.html" %}
+{% block title %}Papelera · DFIR Co-pilot{% endblock %}
+{% block content %}
+<p><a href="/">← Análisis</a></p>
+<h1>Papelera</h1>
+{% if flash %}<div class="msg {{ flash.0 }}">{{ flash.1 }}</div>{% endif %}
+{% if not registry.ok %}<div class="msg error">El registro de eliminaciones no cuadra: {{ registry.problems|join:"; " }}</div>{% endif %}
+<div class="card">
+<p class="hint">{{ items|length }} elemento(s) · {{ total|filesizeformat }} · registro de eliminaciones: {{ registry.records }} entrada(s){% if registry.ok %}, íntegro{% endif %}.</p>
+<table><tr><th>Eliminado</th><th>Tipo</th><th>Nombre</th><th>Archivos</th><th>Tamaño</th><th>Por</th><th></th></tr>
+{% for i in items %}<tr><td><small>{{ i.moved_at_utc|default:"—" }}</small></td><td>{{ i.kind }}</td><td><strong>{{ i.name }}</strong><br><code>{{ i.id }}</code>{% if i.damaged %} <span class="chip chip-failed">ficha dañada</span>{% endif %}</td>
+<td>{{ i.files|length }}</td><td>{{ i.bytes|filesizeformat }}</td><td>{{ i.by|default:"—" }}</td>
+<td><form method="post" action="/papelera/{{ i.item }}/restaurar/" style="display:inline">{% csrf_token %}<button class="btn" type="submit">Restaurar</button></form>
+<details><summary class="muted">Eliminar definitivamente…</summary><form method="post" action="/papelera/{{ i.item }}/eliminar/">{% csrf_token %}
+<label>Escribe <code>{{ i.id }}</code></label><input type="text" name="confirmacion" autocomplete="off" required>
+<button class="danger" type="submit">Eliminar definitivamente</button></form></details></td></tr>
+{% empty %}<tr><td colspan="7" class="muted">La papelera está vacía.</td></tr>{% endfor %}</table></div>
+{% if items %}<form class="card" method="post" action="/papelera/vaciar/">{% csrf_token %}
+<p class="hint">Vaciar elimina definitivamente todo lo que hay en la papelera. Queda constancia de cada uno en el registro.</p>
+<label>Escribe <code>{{ vaciar }}</code></label><input type="text" name="confirmacion" autocomplete="off" required>
+<p class="row"><button class="danger" type="submit">Vaciar papelera</button></p></form>{% endif %}
+{% endblock %}

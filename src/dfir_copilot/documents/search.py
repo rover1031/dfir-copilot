@@ -19,12 +19,8 @@ from dataclasses import dataclass
 
 from dfir_copilot.documents.iocs import strip_repeated
 
-_STOP_EN = frozenset("the a an and or of to in on for with by from at as is are was were be been it its this that these those not no but if "
-                     "then than which who whom their they them we you he she his her our your has have had do does did can could would should "
-                     "will may might also into over under between about after before such".split())
-_STOP_ES = frozenset("el la los las un una unos unas y o de del al en con por para como es son fue fueron ser se su sus lo le les que "
-                     "qué cual cuál quien no pero si sí más menos muy también entre sobre tras desde hasta este esta estos estas ese esa "
-                     "eso esto hay ha han he había puede pueden donde cuando cómo cuánto".split())
+_STOP_EN = frozenset(["the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "with", "by", "from", "at", "as", "is", "are", "was", "were", "be", "been", "it", "its", "this", "that", "these", "those", "not", "no", "but", "if", "then", "than", "which", "who", "whom", "their", "they", "them", "we", "you", "he", "she", "his", "her", "our", "your", "has", "have", "had", "do", "does", "did", "can", "could", "would", "should", "will", "may", "might", "also", "into", "over", "under", "between", "about", "after", "before", "such"])
+_STOP_ES = frozenset(["el", "la", "los", "las", "un", "una", "unos", "unas", "y", "o", "de", "del", "al", "en", "con", "por", "para", "como", "es", "son", "fue", "fueron", "ser", "se", "su", "sus", "lo", "le", "les", "que", "qué", "cual", "cuál", "quien", "no", "pero", "si", "sí", "más", "menos", "muy", "también", "entre", "sobre", "tras", "desde", "hasta", "este", "esta", "estos", "estas", "ese", "esa", "eso", "esto", "hay", "ha", "han", "he", "había", "puede", "pueden", "donde", "cuando", "cómo", "cuánto"])
 _STOP = _STOP_EN | _STOP_ES
 _TOKEN = re.compile(r"[a-z0-9]+(?:[._:-][a-z0-9]+)*")
 _SENT = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9¿¡\"“])")
@@ -146,7 +142,7 @@ def key_sentences(pages: list[str], n: int = 5, min_chars: int = 40, max_chars: 
                 sents.append((p, s.strip()))
     doc = Counter(t for _, s in sents for t in set(tokens(s)))
     scored = []
-    for i, (p, s) in enumerate(sents):
+    for i, (_p, s) in enumerate(sents):
         toks = set(tokens(s))
         if toks:
             scored.append((sum(doc[t] - 1 for t in toks) / math.sqrt(len(toks)), i))

@@ -166,7 +166,7 @@ def _table_pass(path: str | Path, page_nos: list[int], dpi: int, whitelist: str 
         if geo is None:
             continue
         seps, verts = geo
-        bands = [(a, b) for a, b in zip(seps, seps[1:]) if b - a > int(0.008 * H)]
+        bands = [(a, b) for a, b in zip(seps, seps[1:], strict=False) if b - a > int(0.008 * H)]
         v0, v1, v2 = verts[0], verts[1], verts[2]          # borde izquierdo, entre Type e Indicator, entre Indicator y Description
         first = True
         for top, bottom in bands:

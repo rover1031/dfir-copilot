@@ -1,3 +1,4 @@
+"""Rutas de la interfaz web: casos (de un proyecto o sueltos), proyectos, evidencia, incidente, documentos y papelera."""
 from django.urls import path
 
 from dfir_copilot.web import views
@@ -48,3 +49,8 @@ for route, view, name in CASE_ROUTES:
 from dfir_copilot.web.document_views import urlpatterns as _document_urls  # noqa: E402
 
 urlpatterns += _document_urls
+
+# Papelera: eliminar análisis y casos de forma recuperable
+from dfir_copilot.web.trash_views import urlpatterns as _trash_urls  # noqa: E402
+
+urlpatterns += _trash_urls

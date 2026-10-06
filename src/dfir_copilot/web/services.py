@@ -156,6 +156,15 @@ class Services:
             raise NotFound("Trabajo desconocido (¿se reinició el servidor?)")
         return job
 
+    def forget(self, prefix) -> int:
+        """Suelta los agentes en caché de los casos bajo `prefix` (p. ej. un análisis que se mueve a la papelera)."""
+        prefix = str(prefix).rstrip("/")
+        with self._lock:
+            keys = [k for k in self._bundles if k == prefix or k.startswith(prefix + "/")]
+            for k in keys:
+                self._bundles.pop(k, None)
+        return len(keys)
+
 
 _services: Services | None = None
 

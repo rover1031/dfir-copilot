@@ -168,8 +168,10 @@ def dependencias() -> None:
         if not where:
             flag("AVISO", "dependencias", f"`{mod}` se importa en {len(used[mod])} archivo(s) pero `{dist}` no está en pyproject.toml "
                                           f"(p. ej. {sorted(used[mod])[0]})")
-        if ver == "no":
+        if ver == "no" and (not where or where == "base"):
             flag("AVISO", "dependencias", f"`{dist}` se importa pero no está instalado en este entorno")
+        elif ver == "no":
+            out.append(f"  - `{dist}` es opcional ({where}) y no está instalado: la función que lo usa queda desactivada")
 
 
 # --- 3. secretos y .gitignore -----------------------------------------------------------------------------------------------------
@@ -186,6 +188,8 @@ def secretos() -> None:
         except OSError:
             continue
         for n, line in enumerate(lines, 1):
+            if "FAKE" in line or "secreto-de-pruebas" in line:     # valores falsos declarados como tales en las pruebas
+                continue
             for kind, rx in SECRET_PATTERNS.items():
                 if rx.search(line):
                     rel = f.relative_to(ROOT)
