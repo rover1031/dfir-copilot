@@ -169,6 +169,13 @@ def tokens(project) -> dict:
         if n:
             per.append({"file": f.name, "case_id": f.case_id, "tokens": n})
         total += n
+    val = project.dir / "valoracion.json"  # la valoración del incidente también gasta
+    if val.exists():
+        u = (json.loads(val.read_text(encoding="utf-8")).get("usage") or {})
+        n = int(u.get("input_tokens", 0) or 0) + int(u.get("output_tokens", 0) or 0)
+        if n:
+            per.append({"file": "valoración del incidente", "case_id": None, "tokens": n})
+            total += n
     cap = project.settings.max_tokens_incident
     return {"total": total, "cap": cap, "per_source": per, "pct": round(100 * total / cap, 1) if cap else None}
 

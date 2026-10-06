@@ -144,3 +144,7 @@ progress { width:100%; height:10px; accent-color:var(--amber); }
 .tl-hallazgo::before { background:var(--red); } .tl-correlación::before { background:var(--lilac); } .tl-decisión::before { background:var(--green); }
 .tl-custodia::before { background:var(--amber); } .tl-time { font-family:ui-monospace,monospace; font-size:12.5px; color:var(--navy-2); }
 .tl-kind { font-size:11.5px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin-right:4px; }
+
+/* veredicto de la valoración */
+.verdict { border-left:6px solid var(--blue); } .v-incidente_confirmado { border-left-color:var(--red); background:#fff8f5; }
+.v-incidente_probable { border-left-color:var(--amber); background:#fffbf2; } .v-falso_positivo { border-left-color:var(--green); }

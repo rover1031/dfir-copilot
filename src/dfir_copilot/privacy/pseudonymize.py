@@ -184,11 +184,42 @@ def _width(n: int) -> int:
 
 
 def build_pseudonymized(parquet: str | Path, manifest: dict, out_dir: str | Path | None = None,
-                        policy: PrivacyPolicy | None = None, memory_limit: str = "2GB") -> dict:
+                        policy: PrivacyPolicy | None = None, memory_limit: str = "2GB", shared: str | Path | None = None) -> dict:
     """Escribe `<stem>.pseudo-<política>.parquet`, su manifiesto y `<stem>.aliases-<política>.parquet` (diccionario LOCAL).
 
     Es determinista: el mismo dataset con la misma política da los mismos alias y el mismo contenido.
+
+    `shared`: diccionario COMPARTIDO por las fuentes de un mismo análisis (archivo DuckDB, se crea si no existe). Un valor que ya tiene
+    alias en él conserva ese alias; los nuevos se numeran a partir del último de su columna, y el desplazamiento de las columnas numéricas
+    también se comparte. Así una misma IP, usuario o equipo tiene el MISMO alias en el firewall y en el endpoint. Los alias dependen
+    entonces del orden en que se construyen las fuentes (queda dicho en el manifiesto).
     """
+    if shared is not None:
+        lock_path = Path(str(shared) + ".lock")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(lock_path, "a", encoding="utf-8") as fh:  # una fuente a la vez sobre el mismo diccionario
+            try:
+                import fcntl
+
+                fcntl.flock(fh, fcntl.LOCK_EX)
+            except ImportError:  # pragma: no cover
+                pass
+            return _build(parquet, manifest, out_dir, policy, memory_limit, Path(shared))
+    return _build(parquet, manifest, out_dir, policy, memory_limit, None)
+
+
+def _shared_alias(con, table: str, vals_sql: str, known_sql: str, prefix: str, n: int, key: str = "v") -> None:
+    """Alias con diccionario compartido: el valor ya conocido conserva su alias; los nuevos siguen la numeración (orden de aparición)."""
+    (top,) = con.execute(f"SELECT coalesce(max(TRY_CAST(split_part(alias, '-', 2) AS BIGINT)), 0) FROM {known_sql}").fetchone()
+    width = max(4, _width(n + int(top)))
+    con.execute(f"""CREATE TABLE {table} AS
+        WITH vals AS {vals_sql}, known AS {known_sql},
+        fresh AS (SELECT vals.v, row_number() OVER (ORDER BY vals.first_row, vals.v) + {int(top)} AS k FROM vals ANTI JOIN known USING (v))
+        SELECT vals.v AS {key}, coalesce(known.alias, {_lit(prefix + '-')} || lpad(CAST(fresh.k AS VARCHAR), {width}, '0')) AS alias
+        FROM vals LEFT JOIN known USING (v) LEFT JOIN fresh USING (v)""")
+
+
+def _build(parquet, manifest, out_dir, policy, memory_limit, shared: Path | None) -> dict:
     policy = policy or PrivacyPolicy()
     parquet = Path(parquet).resolve()
     out_dir = Path(out_dir or parquet.parent)
@@ -209,6 +240,10 @@ def build_pseudonymized(parquet: str | Path, manifest: dict, out_dir: str | Path
         rows = manifest.get("output", {}).get("rows")
         empty = {c for c, n in manifest.get("null_counts", {}).items() if rows and n == rows}
         con.execute("CREATE TABLE __aliases (col VARCHAR, value VARCHAR, alias VARCHAR)")
+        if shared is not None:
+            con.execute(f"ATTACH {_lit(str(shared))} AS shared")
+            con.execute("CREATE TABLE IF NOT EXISTS shared.aliases (col VARCHAR, value VARCHAR, alias VARCHAR)")
+        known = (lambda col: f"(SELECT value AS v, alias FROM shared.aliases WHERE col = {_lit(col)})") if shared is not None else None
         select, joins, treatments = [], [], {}
         for i, (col, dtype) in enumerate(described):
             kind, prefix = policy.treatment(col, dtype)
@@ -224,11 +259,13 @@ def build_pseudonymized(parquet: str | Path, manifest: dict, out_dir: str | Path
             elif kind in ("alias", "ip"):
                 t = f"__a{i}"
                 n = con.execute(f"SELECT count(DISTINCT {c}) FROM src").fetchone()[0]
-                con.execute(f"""CREATE TABLE {t} AS
-                    SELECT v, {_lit(prefix)} || '-' || lpad(CAST(row_number() OVER (ORDER BY first_row, v) AS VARCHAR),
-                           {_width(n)}, '0') AS alias
-                    FROM (SELECT CAST({c} AS VARCHAR) AS v, min(source_row) AS first_row FROM src
-                          WHERE {c} IS NOT NULL GROUP BY 1)""")
+                vals = f"(SELECT CAST({c} AS VARCHAR) AS v, min(source_row) AS first_row FROM src WHERE {c} IS NOT NULL GROUP BY 1)"
+                if known is None:
+                    con.execute(f"""CREATE TABLE {t} AS
+                        SELECT v, {_lit(prefix)} || '-' || lpad(CAST(row_number() OVER (ORDER BY first_row, v) AS VARCHAR),
+                               {_width(n)}, '0') AS alias FROM {vals}""")
+                else:
+                    _shared_alias(con, t, vals, known(col), prefix, n)
                 con.execute(f"INSERT INTO __aliases SELECT {_lit(col)}, v, alias FROM {t}")
                 joins.append(f"LEFT JOIN {t} ON CAST(src.{c} AS VARCHAR) = {t}.v")
                 select.append(f"{t}.alias AS {c}")
@@ -249,12 +286,15 @@ def build_pseudonymized(parquet: str | Path, manifest: dict, out_dir: str | Path
                         con.unregister("__rest")
                     nets = con.execute(f"SELECT count(DISTINCT net) FROM __ipinfo{i}").fetchone()[0]
                     # alias de red por orden de primera aparición de cualquiera de sus IPs (determinista)
-                    con.execute(f"""CREATE TABLE __nets{i} AS
-                        SELECT net, {_lit(net_prefix + '-')} || lpad(CAST(row_number() OVER (ORDER BY first_row, net) AS VARCHAR),
-                               {_width(nets)}, '0') AS alias
-                        FROM (SELECT i.net, min(a.first_row) AS first_row FROM __ipinfo{i} i
-                              JOIN (SELECT CAST({c} AS VARCHAR) AS v, min(source_row) AS first_row FROM src GROUP BY 1) a
-                                ON a.v = i.v WHERE i.net IS NOT NULL GROUP BY 1)""")
+                    net_vals = (f"(SELECT i.net AS v, min(a.first_row) AS first_row FROM __ipinfo{i} i "
+                                f"JOIN (SELECT CAST({c} AS VARCHAR) AS v, min(source_row) AS first_row FROM src GROUP BY 1) a "
+                                f"ON a.v = i.v WHERE i.net IS NOT NULL GROUP BY 1)")
+                    if known is None:
+                        con.execute(f"""CREATE TABLE __nets{i} AS
+                            SELECT v AS net, {_lit(net_prefix + '-')} || lpad(CAST(row_number() OVER (ORDER BY first_row, v) AS VARCHAR),
+                                   {_width(nets)}, '0') AS alias FROM {net_vals}""")
+                    else:
+                        _shared_alias(con, f"__nets{i}", net_vals, known(col + "_net"), net_prefix, nets, key="net")
                     con.execute(f"INSERT INTO __aliases SELECT {_lit(col + '_net')}, net, alias FROM __nets{i}")
                     joins.append(f"LEFT JOIN __ipinfo{i} ON CAST(src.{c} AS VARCHAR) = __ipinfo{i}.v "
                                  f"LEFT JOIN __nets{i} ON __ipinfo{i}.net = __nets{i}.net")
@@ -267,6 +307,10 @@ def build_pseudonymized(parquet: str | Path, manifest: dict, out_dir: str | Path
             elif kind == "shift":
                 (low,) = con.execute(f"SELECT min({c}) FROM src").fetchone()
                 low = low if low is not None else 0
+                if shared is not None:  # el mismo desplazamiento en todas las fuentes del análisis: los números siguen casando
+                    prev = con.execute(f"SELECT value FROM shared.aliases WHERE col = {_lit(col)} AND alias = '__shift__'").fetchone()
+                    if prev:
+                        low = type(low)(prev[0]) if not isinstance(low, int) else int(float(prev[0]))
                 con.execute(f"INSERT INTO __aliases VALUES ({_lit(col)}, {_lit(str(low))}, '__shift__')")
                 select.append(f"(src.{c} - {low}) AS {c}")
             elif kind == "mask_values":
@@ -284,6 +328,10 @@ def build_pseudonymized(parquet: str | Path, manifest: dict, out_dir: str | Path
         query = f"SELECT {', '.join(select)} FROM src {' '.join(joins)} ORDER BY src.source_row"
         con.execute(f"COPY ({query}) TO {_lit(str(pseudo_path))} (FORMAT PARQUET, COMPRESSION ZSTD)")
         con.execute(f"COPY (SELECT * FROM __aliases ORDER BY col, alias, value) TO {_lit(str(aliases_path))} (FORMAT PARQUET)")
+        if shared is not None:  # los alias nuevos de esta fuente pasan al diccionario del análisis
+            con.execute("INSERT INTO shared.aliases SELECT a.col, a.value, a.alias FROM __aliases a WHERE NOT EXISTS "
+                        "(SELECT 1 FROM shared.aliases s WHERE s.col = a.col AND s.value = a.value)")
+            con.execute("DETACH shared")
         out_rows = con.execute(f"SELECT count(*) FROM read_parquet({_lit(str(pseudo_path))})").fetchone()[0]
     finally:
         con.close()
@@ -302,6 +350,7 @@ def build_pseudonymized(parquet: str | Path, manifest: dict, out_dir: str | Path
         "timezone": manifest.get("timezone"),  # conserva timestamp_local si la zona fue declarada
         "roles": manifest.get("roles"),
         **({"log_schema": manifest["log_schema"]} if manifest.get("log_schema") else {}),
+        **({"shared_dictionary": str(shared)} if shared is not None else {}),
         "time_range_utc": manifest.get("time_range_utc"),
         "null_counts": manifest.get("null_counts", {}),
         "warnings": [],

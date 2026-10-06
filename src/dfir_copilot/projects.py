@@ -219,7 +219,8 @@ class Project:
             source = project.dir / EVIDENCE_DIR
             source.mkdir()
         _atomic_write(project.meta_path, {
-            "project_version": 2, "id": project_id, "name": name, "mode": "evidence" if source_dir is None or not str(source_dir).strip()
+            "project_version": 3, "shared_dictionary": source_dir is None or not str(source_dir).strip(),
+            "id": project_id, "name": name, "mode": "evidence" if source_dir is None or not str(source_dir).strip()
             else "folder", "source_dir": str(source), "ticket": (ticket or "").strip()[:80] or None,
             "description": (description or "").strip()[:2000] or None, "settings": asdict(settings),
             "created_at_utc": datetime.now(UTC).isoformat(timespec="seconds")})
@@ -304,10 +305,19 @@ class Project:
                 return f
         raise ProjectError(f"El proyecto no tiene ningún archivo para el caso '{case_id}'")
 
+    @property
+    def dictionary_path(self) -> Path | None:
+        """Diccionario de alias compartido por las fuentes de este análisis (solo análisis nuevos: `shared_dictionary` en project.json)."""
+        return self.dir / "diccionario.duckdb" if self.meta.get("shared_dictionary") else None
+
     def workspace(self, case_id: str, create: bool = False) -> CaseWorkspace:
         s = self.settings
         if create:
-            return CaseWorkspace.open_or_create(case_id, root=self.cases_dir, analyst=s.analyst, lang=s.language)
+            ws = CaseWorkspace.open_or_create(case_id, root=self.cases_dir, analyst=s.analyst, lang=s.language)
+            marker = ws.dir / "shared_dictionary.txt"
+            if self.dictionary_path and not marker.exists():
+                marker.write_text(str(self.dictionary_path), encoding="utf-8")
+            return ws
         return CaseWorkspace.open(case_id, root=self.cases_dir, lang=s.language)
 
     # --- evidencia y custodia (modo "evidence") ----------------------------------------------------------------------

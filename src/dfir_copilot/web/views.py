@@ -187,7 +187,8 @@ def project_page(request, pid):
     from dfir_copilot import incident
 
     return render(request, "web/project.html", {"project": project, "rows": rows, "running": running, "settings": project.settings,
-                                                 "tokens": incident.tokens(project),
+                                                 "tokens": incident.tokens(project), "assessment": _assessment_view(project, reveal),
+                                                 "model_ok": bool(get_services().deps.structured_llm),
                                                  "llm_ok": ok, "llm_msg": msg, "reveal": reveal, "corr": _correlation_view(project, reveal),
                                                  "corr_error": error.read_text(encoding="utf-8") if error.exists() else None,
                                                  "n_ingested": sum(1 for r in rows if r["has_case"])})
@@ -815,3 +816,79 @@ def incident_timeline(request, pid):
         if cid in shows:
             e["text"] = shows[cid](e["text"])
     return render(request, "web/_incident_timeline.html", {"project": project, "events": events, "reveal": reveal})
+
+
+# --- valoración del incidente e informe del incidente --------------------------------------------------------------------------
+
+_INC_REPORT = re.compile(r"^informe_incidente\.es\.(interno|compartible)\.md$")
+
+
+def _assessment_view(project, reveal: bool) -> dict | None:
+    from dfir_copilot import incident
+    from dfir_copilot.assessment import VERDICTS, load
+
+    a = load(project)
+    if not a or not a.get("ok"):
+        return a
+    v = a["assessment"]
+    if reveal:
+        pss = [s["ws"].pseudonymized()[1] for s in incident.sources(project)]
+
+        def show(text):
+            for ps in pss:
+                text = ps.reveal_any(text)
+            return text
+
+        v["summary"] = show(v["summary"])
+        for side in ("evidence_for", "evidence_against"):
+            v[side] = [{**e, "explanation": show(e["explanation"])} for e in v[side]]
+        v["gaps"], v["next_steps"] = [show(x) for x in v["gaps"]], [show(x) for x in v["next_steps"]]
+    a["verdict_label"] = VERDICTS[v["verdict"]]
+    return a
+
+
+@require_POST
+def incident_assess(request, pid):
+    from dfir_copilot.agent.llm import LLMConfigError
+    from dfir_copilot.assessment import ContextLeak, assess
+
+    project = _open_project(pid)
+    sv = get_services()
+    error = None
+    if not sv.deps.structured_llm:
+        error = "No hay un modelo configurado: define la clave de API en el .env y reinicia la interfaz."
+    else:
+        try:
+            result = assess(project, sv.deps.structured_llm())
+            error = None if result.get("ok") else result.get("error")
+        except (LLMConfigError, ContextLeak) as exc:
+            error = str(exc)
+    return render(request, "web/_assessment.html", {"project": project, "a": _assessment_view(project, _reveal(request)), "error": error,
+                                                    "reveal": _reveal(request), "model_ok": bool(sv.deps.structured_llm)})
+
+
+@require_POST
+def incident_report(request, pid):
+    from dfir_copilot.reporting.incident_report import IncidentReportLeak, export
+
+    project = _open_project(pid)
+    variant = request.POST.get("variant", "compartible")
+    try:
+        r = export(project, variant)
+    except (IncidentReportLeak, ValueError) as exc:
+        return _msg(request, str(exc), status=422)
+    return render(request, "web/_message.html", {"level": "ok", "text": f"Informe del incidente ({variant}) exportado · SHA-256 "
+                  f"{r['sha256'][:16]}… · descárgalo: /proyectos/{project.id}/incidente/informe/{r['path'].name}/"})
+
+
+@require_GET
+def incident_report_download(request, pid, filename):
+    from dfir_copilot.reporting import reports_root
+
+    project = _open_project(pid)
+    if not _INC_REPORT.match(filename):
+        raise Http404("Archivo no permitido")
+    path = reports_root() / project.id / filename
+    if not path.exists():
+        raise Http404("Todavía no se exportó ese informe")
+    return FileResponse(open(path, "rb"), as_attachment=True, filename=filename)

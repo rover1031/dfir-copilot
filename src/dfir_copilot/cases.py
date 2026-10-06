@@ -202,7 +202,9 @@ class CaseWorkspace:
         pseudo = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else None
         if pseudo is None or pseudo["source_parquet"]["sha256"] != dataset["parquet_sha256"]:
             real = json.loads(parquet.with_suffix(".manifest.json").read_text(encoding="utf-8"))
-            pseudo = build_pseudonymized(parquet, real, self.processed_dir, policy)
+            marker = self.dir / "shared_dictionary.txt"  # análisis con diccionario compartido (ver projects.Project.workspace)
+            shared = marker.read_text(encoding="utf-8").strip() if marker.exists() else None
+            pseudo = build_pseudonymized(parquet, real, self.processed_dir, policy, shared=shared)
         engine = QueryEngine(pseudo["output"]["path"], **engine_kwargs)  # verifica el hash del Parquet seudonimizado
         return engine, Pseudonymizer(pseudo)
 

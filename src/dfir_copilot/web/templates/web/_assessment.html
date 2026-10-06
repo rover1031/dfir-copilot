@@ -1,0 +1,13 @@
+<div id="assessment">{% if error %}<div class="msg error">{{ error }}</div>{% endif %}
+{% if a and a.ok %}<div class="card verdict v-{{ a.assessment.verdict }}"><h3>{{ a.verdict_label }} <span class="badge">confianza {{ a.assessment.confidence }}</span>
+{% if a.assessment.attack_type %}<span class="badge">{{ a.assessment.attack_type }}</span>{% endif %}</h3>
+<p>{{ a.assessment.summary }}</p>{% if a.assessment.mitre %}<p>{% for m in a.assessment.mitre %}<span class="chip">{{ m }}</span>{% endfor %}</p>{% endif %}
+<div class="grid"><div><h3>A favor</h3>{% for e in a.assessment.evidence_for %}<p><code>{{ e.ref }}</code> <span class="src src-{% if e.source == 'Firewall' %}network{% elif e.source == 'Endpoint' %}endpoint{% elif e.source == 'Correlación' %}corr{% elif e.source == 'Web' %}web{% else %}other{% endif %}">{{ e.source }}</span> {{ e.explanation }}</p>{% empty %}<p class="muted">—</p>{% endfor %}</div>
+<div><h3>En contra</h3>{% for e in a.assessment.evidence_against %}<p><code>{{ e.ref }}</code> <span class="src src-{% if e.source == 'Firewall' %}network{% elif e.source == 'Endpoint' %}endpoint{% elif e.source == 'Correlación' %}corr{% elif e.source == 'Web' %}web{% else %}other{% endif %}">{{ e.source }}</span> {{ e.explanation }}</p>{% empty %}<p class="muted">—</p>{% endfor %}</div></div>
+{% if a.assessment.gaps %}<h3>Qué falta comprobar</h3><ul>{% for g in a.assessment.gaps %}<li>{{ g }}</li>{% endfor %}</ul>{% endif %}
+{% if a.assessment.next_steps %}<h3>Siguientes pasos</h3><ul>{% for g in a.assessment.next_steps %}<li>{{ g }}</li>{% endfor %}</ul>{% endif %}
+<p class="hint">Valoración del modelo ({{ a.computed_at_utc }}). Solo vio información en alias. Citas verificadas por código: {{ a.discarded_refs }} descartada(s) por no existir.{% for n in a.code_notes %} {{ n }}{% endfor %}</p></div>
+{% elif a %}<div class="msg error">La última valoración no se pudo usar: {{ a.error }}</div>{% endif %}
+<form hx-post="/proyectos/{{ project.id }}/incidente/valoracion/" hx-target="#assessment" hx-swap="outerHTML">{% csrf_token %}<input type="hidden" name="reveal" value="{% if reveal %}1{% else %}0{% endif %}">
+<button type="submit" {% if not model_ok %}disabled{% endif %}>{% if a %}Volver a pedir la valoración{% else %}Pedir la valoración al modelo{% endif %}</button> <span class="spin">el modelo está analizando el incidente…</span>
+<small class="muted"> Una llamada (gasta tokens del incidente). Ve hallazgos, correlación, perfiles, hipótesis, notas y conclusiones; nunca filas ni valores reales.</small></form></div>

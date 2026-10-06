@@ -20,3 +20,19 @@ Todo se muestra en alias (cada fuente con su diccionario) y con valores reales s
 
 Siguiente (E2): diccionario de alias compartido por análisis (solo análisis nuevos), un agente del incidente que consulta todas las fuentes
 y da su valoración (¿incidente?, ¿qué ataque?, confianza, evidencia a favor y en contra), e informes por fuente y del incidente al pulsar.
+
+## E2: diccionario compartido, valoración e informe del incidente
+
+* **Diccionario compartido** (solo análisis creados con «Nuevo análisis» desde esta versión): `diccionario.duckdb` en la carpeta del
+  análisis. Un valor que ya tiene alias en una fuente conserva ese alias en las demás (la misma IP es `IP-0006` en el firewall y en el
+  endpoint); los nuevos siguen la numeración. Los análisis anteriores conservan sus alias por fuente: sus hipótesis y notas siguen alineadas.
+* **🧠 Valoración del incidente** (botón, una llamada al modelo): veredicto (confirmado, probable, no concluyente, falso positivo),
+  confianza, tipo de ataque, técnicas ATT&CK, evidencia a favor y EN CONTRA citada por id (f-..., h-..., C1...), qué falta comprobar y
+  siguientes pasos. El modelo ve hallazgos, correlación, perfiles, hipótesis, decisiones, notas y las conclusiones de las conversaciones,
+  todo en alias; la descripción del análisis NO se envía. Salvaguardas por código: si el contexto llevara un valor real no se envía; las
+  citas que no existen se descartan; un veredicto «confirmado/probable» sin evidencia citable se rebaja a «no concluyente»; las técnicas
+  con formato inválido se quitan. Se guarda en `valoracion.json` con su hash en el ledger de cada fuente y cuenta para el tope del incidente.
+* **📄 Informe del incidente** (botón): valoración, fuentes y custodia, hallazgos por fuente, correlación, línea de tiempo, hipótesis y
+  decisiones, conclusiones de las conversaciones, consumo y limitaciones. «Compartible» en alias (si llevara un valor real no se escribe)
+  o «interno» con valores reales. Queda en el ledger de cada fuente. El informe de cada fuente sigue en su caso (pestaña Informe).
+* Siguiente (E3): un agente conversacional del incidente que consulte varias fuentes en la misma conversación.

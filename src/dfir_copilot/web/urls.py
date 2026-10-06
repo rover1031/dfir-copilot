@@ -35,6 +35,9 @@ urlpatterns = [
     path("proyectos/<str:pid>/correlacion/", views.project_correlate, name="project_correlate"),
     path("proyectos/<str:pid>/incidente/hallazgos/", views.incident_findings, name="incident_findings"),
     path("proyectos/<str:pid>/incidente/linea-de-tiempo/", views.incident_timeline, name="incident_timeline"),
+    path("proyectos/<str:pid>/incidente/valoracion/", views.incident_assess, name="incident_assess"),
+    path("proyectos/<str:pid>/incidente/informe/", views.incident_report, name="incident_report"),
+    path("proyectos/<str:pid>/incidente/informe/<str:filename>/", views.incident_report_download, name="incident_report_download"),
     path("proyectos/<str:pid>/analizar/<str:cid>/", views.project_run, name="project_run"),
 ]
 for route, view, name in CASE_ROUTES:

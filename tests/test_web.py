@@ -635,3 +635,37 @@ def test_el_tope_del_incidente_bloquea_preguntar(env):
     p.meta_path.write_text(json.dumps(meta))
     r = client.post(CASE + "preguntar/", {"question": "¿Algo?"})
     assert r.status_code == 409 and "tope de tokens del incidente" in r.content.decode()
+
+
+# --- valoración e informe del incidente -------------------------------------------------------------------------------------
+
+def test_valoracion_e_informe_del_incidente_desde_la_pagina(tmp_path, monkeypatch):
+    from dfir_copilot.interpret.structured import StructuredReply
+    from dfir_copilot.synthetic_endpoint import make_endpoint_dataset, write_endpoint
+    from dfir_copilot.synthetic_firewall import make_firewall_dataset, write_firewall
+
+    sv, inbox = make_env(tmp_path, monkeypatch, model=False)
+    fw, ft = make_firewall_dataset(hosts=12, days=31)
+    edr, et = make_endpoint_dataset(fw, ft)
+    write_firewall(fw, inbox / "firewall.csv", "paloalto")
+    write_endpoint(edr, inbox / "falcon.csv", "falcon_csv")
+
+    class Fake:
+        def invoke(self, system, user, schema):
+            return StructuredReply({"verdict": "incidente_probable", "confidence": "media", "summary": "Baliza periódica atribuida a un LOLBin.",
+                                    "evidence_for": [{"ref": "C1", "explanation": "atribución de la correlación"}],
+                                    "evidence_against": [], "gaps": [], "next_steps": []}, {"input_tokens": 100, "output_tokens": 50})
+
+    reset_services(sync=True, deps=Deps(agent_llm=None, structured_llm=lambda: Fake()), cases_root=tmp_path / "cases")
+    c = Client()
+    wizard(c, timezone="")
+    c.post("/proyectos/firewall-octubre/archivos/servidor/agregar/", {"paths": ["analisis1/firewall.csv", "analisis1/falcon.csv"], "modo": "copy"})
+    assert "Pedir la valoración al modelo" in c.get("/proyectos/firewall-octubre/").content.decode()
+    r = c.post("/proyectos/firewall-octubre/incidente/valoracion/").content.decode()
+    assert "Incidente probable" in r and "Correlación" in r
+    msg = c.post("/proyectos/firewall-octubre/incidente/informe/", {"variant": "compartible"}).content.decode()
+    assert "exportado" in msg
+    got = c.get("/proyectos/firewall-octubre/incidente/informe/informe_incidente.es.compartible.md/")
+    body = b"".join(got.streaming_content).decode()
+    assert got.status_code == 200 and "Informe del incidente" in body and et.beacon_host not in body
+    assert c.get("/proyectos/firewall-octubre/incidente/informe/..%2Fsecreto.md/").status_code == 404
