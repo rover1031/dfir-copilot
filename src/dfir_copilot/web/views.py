@@ -12,7 +12,7 @@ from django.shortcuts import redirect, render
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from dfir_copilot.privacy import AmbiguousText
-from dfir_copilot.projects import Project, ProjectError, ProjectSettings, browse, data_root
+from dfir_copilot.projects import Project, ProjectError, ProjectSettings, browse, data_root, inbox_root
 from dfir_copilot.reporting import ReportError, export_report, reports_root
 from dfir_copilot.timezone_status import BASES, TimezoneError, confirm_timezone, timezone_state
 from dfir_copilot.web.services import Busy, NotFound, get_services
@@ -107,6 +107,26 @@ def _ingested(project: Project, case_id: str) -> bool:
         return False
 
 
+def _case_tokens(project: Project, case_id: str) -> dict | None:
+    """Tokens gastados por el caso: la interpretación del perfil más todos los turnos del agente (del ledger, sin abrir DuckDB)."""
+    case_dir = project.cases_dir / case_id
+    interp, agent = 0, 0
+    path = case_dir / "p1" / "interpretacion.json"
+    if path.exists():
+        try:
+            u = json.loads(path.read_text(encoding="utf-8")).get("usage") or {}
+            interp = int(u.get("input_tokens", 0) or 0) + int(u.get("output_tokens", 0) or 0) or int(u.get("total_tokens", 0) or 0)
+        except (OSError, ValueError, TypeError):
+            interp = 0
+    for ledger in (case_dir / "ledger").glob("*.jsonl") if (case_dir / "ledger").is_dir() else ():
+        for line in ledger.read_text(encoding="utf-8").splitlines():
+            if '"agent_turn"' in line:
+                d = json.loads(line).get("data", {})
+                agent += int(d.get("tokens_delta") if d.get("tokens_delta") is not None else (d.get("tokens") or 0))
+    total = interp + agent
+    return {"interpret": f"{interp:,}", "agent": f"{agent:,}", "total": f"{total:,}"} if total else None
+
+
 def _project_rows(project: Project) -> tuple[list[dict], bool]:
     sv = get_services()
     rows, running = [], False
@@ -116,7 +136,7 @@ def _project_rows(project: Project) -> tuple[list[dict], bool]:
         running = running or is_running
         # estado "running" en disco sin hilo vivo: el servidor se reinició a mitad de un análisis
         interrupted = bool(st and st.get("state") == "running" and not is_running)
-        rows.append({"file": f, "status": st, "running": is_running, "interrupted": interrupted,
+        rows.append({"file": f, "status": st, "running": is_running, "interrupted": interrupted, "tokens": _case_tokens(project, f.case_id),
                      "has_case": _ingested(project, f.case_id),
                      "steps": list((st or {}).get("steps", {}).items())})
     return rows, running
@@ -461,7 +481,10 @@ def healthz(request):
 
 COMMON_ZONES = ("America/Santiago", "America/Bogota", "America/Lima", "America/Guayaquil", "America/Panama", "America/Santo_Domingo",
                 "America/Mexico_City", "America/Argentina/Buenos_Aires", "UTC")
-_KIND_LABEL = {"log": "log", "excel": "Excel (por hojas)", "document": "documento", "other": "no admitido"}
+_KIND_LABEL = {"log": "log", "excel": "Excel (por hojas)", "text": "texto (Palo Alto / Nginx)", "document": "documento",
+               "other": "no admitido"}
+_STATE_LABEL = {"running": "analizando…", "done": "listo", "needs_attention": "listo · revisar avisos", "failed": "falló",
+                "unsupported": "no soportado", "pending": "en cola"}
 
 
 @require_http_methods(["GET", "POST"])
@@ -499,15 +522,26 @@ def _evidence_rows(project: Project) -> list[dict]:
             origin = f"del servidor: {e.get('origin_path')} ({'copiado' if e.get('mode') == 'copy' else 'enlazado'})"
         else:
             origin = "—"
+        st = project.status(f.case_id) or {}
+        state = st.get("state")
         rows.append({"file": f, "kind_label": _KIND_LABEL.get(f.kind, f.kind), "sha": e.get("sha256"), "origin": origin,
-                     "by": e.get("analyst"), "at": e.get("at_utc")})
+                     "by": e.get("analyst"), "at": e.get("at_utc"), "state": state, "state_label": _STATE_LABEL.get(state, "en cola")})
     return rows
 
 
 def _evidence_list(request, project: Project, flash: tuple | None = None, status: int = 200):
     rows = _evidence_rows(project)
-    return render(request, "web/_evidence_list.html", {"project": project, "rows": rows, "flash": flash,
+    running = any(get_services().runner.running(project.id, r["file"].case_id) for r in rows)
+    return render(request, "web/_evidence_list.html", {"project": project, "rows": rows, "flash": flash, "running": running,
                                                          "n_logs": sum(1 for r in rows if r["file"].supported)}, status=status)
+
+
+def _start_new(project: Project) -> None:
+    """Análisis automático: cada log que entra y aún no tiene estado se pone a analizar (un archivo a la vez, en segundo plano)."""
+    sv = get_services()
+    for f in project.files():
+        if f.supported and project.status(f.case_id) is None and not sv.runner.running(project.id, f.case_id):
+            sv.runner.submit(project, f, sv.deps)
 
 
 def _open_evidence_project(pid: str) -> Project:
@@ -523,8 +557,14 @@ def evidence_page(request, pid):
     if project.mode != "evidence":
         return redirect(f"/proyectos/{project.id}/")
     rows = _evidence_rows(project)
+    running = any(get_services().runner.running(project.id, r["file"].case_id) for r in rows)
     return render(request, "web/evidence.html", {"project": project, "rows": rows, "n_logs": sum(1 for r in rows if r["file"].supported),
-                                                 "max_mb": django_settings.DFIR_MAX_UPLOAD_MB, "data_root": data_root()})
+                                                 "max_mb": django_settings.DFIR_MAX_UPLOAD_MB, "inbox": inbox_root(), "running": running})
+
+
+@require_GET
+def evidence_list(request, pid):
+    return _evidence_list(request, _open_evidence_project(pid))
 
 
 @require_POST
@@ -542,6 +582,8 @@ def evidence_upload(request, pid):
             errors += [f"{r['file']}: {r['error']}" for r in recs if r["action"] == "derivation_failed"]
         except ProjectError as exc:
             errors.append(f"{f.name}: {exc}")
+    if added:
+        _start_new(project)
     return _evidence_list(request, project, _flash(added, errors), status=200 if added or not errors else 400)
 
 
@@ -558,7 +600,7 @@ def _flash(added: list[str], errors: list[str]) -> tuple:
 def evidence_browse(request, pid):
     project = _open_evidence_project(pid)
     try:
-        listing = browse(request.GET.get("ruta", ""))
+        listing = browse(request.GET.get("ruta", ""), base=inbox_root())
     except ProjectError as exc:
         return _msg(request, str(exc), status=400)
     return render(request, "web/_server_browser.html", {"project": project, "b": listing})
@@ -574,11 +616,13 @@ def evidence_add(request, pid):
     added, errors = [], []
     for rel in paths:
         try:
-            recs = project.add_from_server(data_root() / rel, mode=mode, analyst=project.settings.analyst)
+            recs = project.add_from_server(inbox_root() / rel, mode=mode, analyst=project.settings.analyst, base=inbox_root())
             added += [r["file"] for r in recs if r["action"] in ("added", "derived")]
             errors += [f"{r['file']}: {r['error']}" for r in recs if r["action"] == "derivation_failed"]
         except ProjectError as exc:
             errors.append(f"{rel}: {exc}")
+    if added:
+        _start_new(project)
     return _evidence_list(request, project, _flash(added, errors), status=200 if added or not errors else 400)
 
 

@@ -24,6 +24,7 @@ urlpatterns = [
     path("analisis/nuevo/", views.analysis_new, name="analysis_new"),
     path("proyectos/nuevo/", views.project_create, name="project_create"),
     path("proyectos/<str:pid>/archivos/", views.evidence_page, name="evidence"),
+    path("proyectos/<str:pid>/archivos/lista/", views.evidence_list, name="evidence_list"),
     path("proyectos/<str:pid>/archivos/subir/", views.evidence_upload, name="evidence_upload"),
     path("proyectos/<str:pid>/archivos/servidor/", views.evidence_browse, name="evidence_browse"),
     path("proyectos/<str:pid>/archivos/servidor/agregar/", views.evidence_add, name="evidence_add"),

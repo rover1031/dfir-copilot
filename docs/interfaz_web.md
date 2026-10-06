@@ -131,3 +131,11 @@ En **Hipótesis**, cada propuesta pendiente tiene su propio Aprobar/Rechazar y s
 ## Pestaña Datos
 
 El perfil de ingeniero de datos del caso (campos, IPs por alcance, eventos por día y hora, huecos, calidad del dato). Ver `docs/perfil_datos.md`.
+
+## Análisis automático, carpeta de entrada y consumo
+
+* Cada log **se analiza solo en cuanto entra** al análisis (subido o elegido del servidor); la lista de archivos muestra su estado y se
+  actualiza sola. Ya no hay que pulsar «Analizar».
+* «Elegir del servidor» solo muestra la **carpeta de entrada** (`<raíz de datos>/inbox`, o `DFIR_INBOX_ROOT`), no las carpetas internas.
+* La página del análisis muestra los **tokens gastados por cada caso** (interpretación del perfil más los turnos del agente), leídos del ledger.
+* Logs de texto: ver `docs/logs_texto.md`.

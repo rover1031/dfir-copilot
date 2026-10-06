@@ -5,6 +5,7 @@
 <script src="{% static 'web/htmx.min.js' %}" defer></script>
 </head>
 <body hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
-<header class="top"><a href="/">DFIR Co-pilot</a><span class="muted">interfaz local · el análisis lo hace el código, el modelo solo enriquece</span></header>
+<header class="top"><a class="brand" href="/"><span class="logo">◆</span> DFIR Co-pilot</a><span class="tagline">interfaz local · el análisis lo hace el código, el modelo solo enriquece</span>
+<nav class="topnav"><a href="/">Análisis</a><a class="cta" href="/analisis/nuevo/">+ Nuevo análisis</a></nav></header>
 <main>{% block content %}{% endblock %}</main>
 </body></html>

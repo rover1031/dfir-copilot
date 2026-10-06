@@ -62,7 +62,7 @@ user_id:
   domain: common
   description: {es: Identidad del actor, en: Actor identity}
   # Orden = preferencia: nombres legibles antes que identificadores numéricos (uid)
-  aliases: [srcuser, source_user, src_user, user_origen, usuario_origen, user_src, user_id, user_name, username, user, userid, account_name, account, principal, user_principal_name, upn,
+  aliases: [remote_user, srcuser, source_user, src_user, user_origen, usuario_origen, user_src, user_id, user_name, username, user, userid, account_name, account, principal, user_principal_name, upn,
             subject_user_name, target_user_name, user_identity_arn, cs_username, login, uid,
             usuario, nombre_usuario, nombre_de_usuario, id_usuario, cuenta, cuenta_usuario, login_usuario]
   weak_aliases: [actor, name, nombre]

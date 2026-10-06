@@ -1,5 +1,5 @@
 <div id="browser">
-<p class="row"><small>Carpeta: <code>/{{ b.rel }}</code></small>
+<p class="row"><small>📥 inbox/<code>{{ b.rel }}</code></small>
 {% if b.parent is not None %}<a class="btn secondary" hx-get="/proyectos/{{ project.id }}/archivos/servidor/?ruta={{ b.parent|urlencode }}" hx-target="#browser" hx-swap="outerHTML">↑ Subir</a>{% endif %}</p>
 {% for d in b.dirs %}<a class="chip" hx-get="/proyectos/{{ project.id }}/archivos/servidor/?ruta={{ d.rel|urlencode }}" hx-target="#browser" hx-swap="outerHTML">📁 {{ d.name }}</a>{% endfor %}
 <form hx-post="/proyectos/{{ project.id }}/archivos/servidor/agregar/" hx-target="#evidence" hx-swap="outerHTML">{% csrf_token %}

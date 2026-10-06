@@ -1,7 +1,7 @@
 <div id="files" {% if running %}hx-get="/proyectos/{{ project.id }}/estado/" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
 <div class="card"><table><tr><th>Archivo</th><th>Análisis</th><th></th></tr>
 {% for r in rows %}<tr>
-<td><strong>{{ r.file.name }}</strong><br><small>{{ r.file.size|filesizeformat }}</small></td>
+<td><strong>{{ r.file.name }}</strong><br><small>{{ r.file.size|filesizeformat }}</small>{% if r.tokens %}<br><span class="tokens" title="interpretación {{ r.tokens.interpret }} · agente {{ r.tokens.agent }}">🪙 {{ r.tokens.total }} tokens</span>{% endif %}</td>
 <td>{% if not r.file.supported %}<span class="chip chip-skipped">{{ r.file.reason }}</span>
 {% elif r.status %}{% for name, s in r.steps %}<span class="chip chip-{{ s.status }}" title="{{ s.message }}">{{ name }}</span>{% endfor %}
 <br><small class="muted">{% if r.running %}en curso…{% elif r.interrupted %}interrumpido (se reinició el servidor): pulsa Reanalizar{% elif r.status.state == "unsupported" %}no soportado todavía (no es un error){% else %}{{ r.status.state }}{% endif %}</small>

@@ -42,7 +42,7 @@ def make_env(tmp_path, monkeypatch, first_script=None, model=True):
     inbox.mkdir(parents=True)
     rows, _ = make_idor_dataset()
     write_csv(inbox / "three_months.csv", rows)
-    (inbox / "notas.txt").write_text("no es un log", encoding="utf-8")
+    (inbox / "notas.docx").write_text("no es un log", encoding="utf-8")
     monkeypatch.setenv("DFIR_DATA_ROOT", str(data))
     monkeypatch.setenv("DFIR_PROJECTS_ROOT", str(data / "projects"))
     monkeypatch.setenv("DFIR_REPORTS_ROOT", str(tmp_path / "reports"))
@@ -96,7 +96,7 @@ def test_crear_un_proyecto_lanza_el_analisis_y_muestra_el_avance(env):
     client, sv, _ = env
     page = client.get("/proyectos/analisis-1/").content.decode()
     assert "three_months.csv" in page and "formato no soportado" in page and "Abrir caso" in page
-    assert page.count("Abrir caso") == 1                                  # solo el archivo ingerido: notas.txt no tiene nada que abrir
+    assert page.count("Abrir caso") == 1                                  # solo el archivo ingerido: notas.docx no tiene nada que abrir
     for step in ("draft", "ingest", "copy", "detectors", "triage"):
         assert f">{step}<" in page
     st = Project.open("analisis-1").status("analisis-1--three-months")
@@ -436,17 +436,17 @@ def test_subir_elegir_del_servidor_analizar_y_custodia(tmp_path, monkeypatch):
                                             SimpleUploadedFile("x.exe", b"MZ")]})
     html = up.content.decode()
     assert up.status_code == 200 and "acceso.csv" in html and "x.exe" in html and "no admitido" in html
-    listing = c.get(base + "servidor/?ruta=inbox/analisis1").content.decode()
-    assert "three_months.csv" in listing and "notas.txt" in listing
+    listing = c.get(base + "servidor/?ruta=analisis1").content.decode()
+    assert "three_months.csv" in listing and "notas.docx" in listing
     assert c.get(base + "servidor/?ruta=../..").status_code == 400
     assert ">📁 projects<" not in c.get(base + "servidor/").content.decode()   # la carpeta interna de proyectos no se ofrece
-    add = c.post(base + "servidor/agregar/", {"paths": ["inbox/analisis1/three_months.csv", "../../etc/passwd"], "modo": "copy"})
+    add = c.post(base + "servidor/agregar/", {"paths": ["analisis1/three_months.csv", "../../etc/passwd"], "modo": "copy"})
     html = add.content.decode()
     assert "three_months.csv" in html and "No se pudo" in html and "etc/passwd" in html
-    r = c.post(base + "analizar/")
-    assert r.status_code == 302 and r["Location"] == "/proyectos/firewall-octubre/"
-    page = c.get(r["Location"]).content.decode()
+    page = c.get("/proyectos/firewall-octubre/").content.decode()                  # sin pulsar nada: se analizaron al entrar
     assert page.count("Abrir caso") == 2 and "Archivos y custodia" in page and "INC-77" in page
+    listing = c.get(base + "lista/").content.decode()
+    assert "listo" in listing and "analizando" not in listing
     assert Project.open("firewall-octubre").verify_custody()["ok"]
 
 
@@ -463,7 +463,7 @@ def test_el_limite_de_tamano_y_csrf_protegen_la_subida(tmp_path, monkeypatch):
     assert r.status_code == 400 and "límite" in r.content.decode() and Project.open("firewall-octubre").files() == []
     strict = Client(enforce_csrf_checks=True)
     assert strict.post(base + "subir/", {"files": [SimpleUploadedFile("a.csv", b"x\n1\n")]}).status_code == 403
-    assert strict.post(base + "servidor/agregar/", {"paths": ["inbox/analisis1/three_months.csv"]}).status_code == 403
+    assert strict.post(base + "servidor/agregar/", {"paths": ["analisis1/three_months.csv"]}).status_code == 403
 
 
 def test_un_proyecto_por_carpeta_no_admite_subidas(tmp_path, monkeypatch):
@@ -480,7 +480,7 @@ def test_confirmar_la_zona_desde_el_caso(tmp_path, monkeypatch):
     _, inbox = make_env(tmp_path, monkeypatch, model=False)
     c = Client()
     wizard(c)
-    c.post("/proyectos/firewall-octubre/archivos/servidor/agregar/", {"paths": ["inbox/analisis1/three_months.csv"], "modo": "copy"})
+    c.post("/proyectos/firewall-octubre/archivos/servidor/agregar/", {"paths": ["analisis1/three_months.csv"], "modo": "copy"})
     c.post("/proyectos/firewall-octubre/archivos/analizar/")
     cid = Project.open("firewall-octubre").files()[0].case_id
     case = f"/proyectos/firewall-octubre/casos/{cid}/"
@@ -544,3 +544,18 @@ def test_un_caso_sin_perfil_ofrece_calcularlo(quiet):
     assert "Calcular el perfil" in client.get(CASE + "tab/datos/").content.decode()
     done = client.post(CASE + "perfil/").content.decode()
     assert "Perfil calculado" in done and "Eventos por hora" in done and ws.verify().ok
+
+
+
+def test_el_servidor_solo_ofrece_la_carpeta_de_entrada(tmp_path, monkeypatch):
+    make_env(tmp_path, monkeypatch, model=False)
+    c = Client()
+    wizard(c)
+    root = c.get("/proyectos/firewall-octubre/archivos/servidor/").content.decode()
+    assert "analisis1" in root and ">📁 inbox<" not in root and ">📁 projects<" not in root      # solo lo que hay dentro de inbox
+
+
+def test_el_proyecto_muestra_el_consumo_de_tokens_por_caso(env):
+    client, _, _ = env                                                           # el triaje simulado gastó tokens
+    page = client.get("/proyectos/analisis-1/").content.decode()
+    assert "🪙" in page and "tokens" in page

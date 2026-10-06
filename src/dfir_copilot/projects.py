@@ -19,6 +19,7 @@ Toda ruta del servidor debe estar DENTRO de la raíz de datos: la interfaz no de
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -31,6 +32,7 @@ from pathlib import Path
 
 from dfir_copilot.cases import CaseWorkspace
 from dfir_copilot.ingest.excel import EXCEL_SUFFIXES, ExcelError, excel_to_csv
+from dfir_copilot.ingest.text_logs import TEXT_SUFFIXES, TextLogError, text_to_csv
 
 try:  # bloqueo de la custodia entre hilos y procesos (en Windows sin WSL no existe: se escribe sin bloqueo)
     import fcntl
@@ -60,6 +62,14 @@ def slugify(text: str, limit: int = 40) -> str:
 
 def data_root() -> Path:
     return Path(os.environ.get("DFIR_DATA_ROOT", DEFAULT_DATA_ROOT))
+
+
+def inbox_root() -> Path:
+    """Carpeta de entrada: lo único que la interfaz ofrece para elegir archivos del servidor (no las carpetas internas)."""
+    root = Path(os.environ.get("DFIR_INBOX_ROOT", str(data_root() / "inbox")))
+    with contextlib.suppress(OSError):  # sin permiso para crearla: se informa al navegarla
+        root.mkdir(parents=True, exist_ok=True)
+    return root
 
 
 def projects_root() -> Path:
@@ -131,6 +141,8 @@ def file_kind(name: str) -> str:
         return "excel"
     if lower.endswith(DOCUMENT_SUFFIXES):
         return "document"
+    if lower.endswith(TEXT_SUFFIXES):
+        return "text"
     return "other"
 
 
@@ -170,6 +182,9 @@ def _reason(kind: str, mode: str) -> str | None:
                 else "Excel: añádelo desde «Nuevo análisis» para convertir sus hojas")
     if kind == "document":
         return "documento (no es un log): guardado como evidencia"
+    if kind == "text":
+        return ("log de texto: se analiza por sus CSV derivados (Palo Alto o Nginx/Apache)" if mode == "evidence"
+                else "log de texto: añádelo desde «Nuevo análisis» para convertirlo")
     return None if kind == "log" else "formato no soportado"
 
 
@@ -369,6 +384,19 @@ class Project:
 
     def _admit(self, target: Path, sha: str, size: int, analyst: str | None, **origin) -> list[dict]:
         out = [self._custody("added", file=target.name, sha256=sha, bytes=size, kind=file_kind(target.name), analyst=analyst, **origin)]
+        if file_kind(target.name) == "text":
+            stem = _split_name(target.name)[0]
+            try:
+                parts = text_to_csv(target, lambda label: self._unique(f"{stem}__{label}.csv"))
+            except TextLogError as exc:
+                out.append(self._custody("derivation_failed", file=target.name, error=str(exc)[:300], analyst=analyst))
+                return out
+            for part in parts:
+                d_sha, d_size = sha256_path(part["path"])
+                out.append(self._custody("derived", file=part["path"].name, sha256=d_sha, bytes=d_size, kind="log", analyst=analyst,
+                                         derived_from={"file": target.name, "sha256": sha}, format=part["format"], rows=part["rows"],
+                                         skipped=part["skipped"]))
+            return out
         if file_kind(target.name) == "excel":
             stem = _split_name(target.name)[0]
             try:
@@ -388,7 +416,8 @@ class Project:
         self._require_evidence()
         name = safe_name(filename)
         if not accepted(name):
-            raise ProjectError(f"Tipo de archivo no admitido: {name} (se admiten logs CSV, TSV, JSON, NDJSON y Parquet, Excel y PDF)")
+            raise ProjectError(f"Tipo de archivo no admitido: {name} (se admiten logs CSV, TSV, JSON, NDJSON, Parquet y de texto "
+                               ".log/.txt, Excel y PDF)")
         target = self._unique(name)
         sha, size = self._write(target, chunks, max_bytes)
         return self._admit(target, sha, size, analyst, origin="upload", origin_name=(filename or "")[:300], mode="copy")

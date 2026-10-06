@@ -20,7 +20,7 @@ def base(tmp_path):
     inbox.mkdir(parents=True)
     rows, _ = make_idor_dataset()
     write_csv(inbox / "three_months.csv", rows)
-    (inbox / "notas.txt").write_text("no es un log", encoding="utf-8")
+    (inbox / "notas.docx").write_text("no es un log", encoding="utf-8")
     return tmp_path, inbox
 
 
@@ -40,7 +40,7 @@ def test_un_proyecto_descubre_sus_archivos_y_da_un_caso_a_cada_uno(base):
     assert project.id == "analisis-1" and project.name == "Análisis 1"
     files = {f.name: f for f in project.files()}
     assert files["three_months.csv"].supported and files["three_months.csv"].case_id == "analisis-1--three-months"
-    assert not files["notas.txt"].supported and files["notas.txt"].reason == "formato no soportado"
+    assert not files["notas.docx"].supported and files["notas.docx"].reason == "formato no soportado"
     assert project.file("analisis-1--three-months").name == "three_months.csv"
     with pytest.raises(ProjectError):
         project.file("otro")
@@ -115,7 +115,7 @@ def test_la_zona_declarada_al_crear_el_proyecto_queda_en_el_mapping_sin_verifica
 
 def test_un_archivo_no_soportado_se_detiene_en_el_primer_paso_con_su_motivo(base):
     project = make_project(base, use_llm=False)
-    notas = next(f for f in project.files() if f.name == "notas.txt")
+    notas = next(f for f in project.files() if f.name == "notas.docx")
     st = run_pipeline(project, notas, Deps())
     assert st["state"] == "unsupported" and st["steps"]["draft"]["status"] == "unsupported"   # no es un fallo: no hay nada que reintentar
     assert "no soportado" in st["steps"]["draft"]["message"]

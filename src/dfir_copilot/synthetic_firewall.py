@@ -19,6 +19,7 @@ mismo: sirven para comprobar que el análisis NO depende del formato.
 from __future__ import annotations
 
 import csv
+import io
 import json
 import random
 from dataclasses import dataclass
@@ -188,4 +189,28 @@ def write_firewall(rows: list[dict], path: str | Path, style: str = "generic_es"
                             r["user"] or "", r["device"], r["application"] or ""])
             else:
                 w.writerow([*common, r["protocol"], r["action"], r["bytes_sent"], r["bytes_received"], r["rule"], r["user"] or "", r["device"]])
+    return path
+
+
+def _port(v) -> str:
+    return "" if v is None else str(v)
+
+
+def write_panos_syslog(rows: list[dict], path: str | Path) -> Path:
+    """Las mismas filas como syslog nativo de PAN-OS (TRAFFIC), con cabecera RFC 3164, en las posiciones de campo documentadas.
+    Debe dar EXACTAMENTE los mismos hallazgos que `write_firewall(..., "paloalto")`: así se comprueba el lector de texto."""
+    path = Path(path)
+    subtype = {"ALLOW": "end", "BLOCK": "deny", "DROP": "drop", "REJECT": "deny"}
+    with path.open("w", encoding="utf-8", newline="") as fh:
+        for i, r in enumerate(rows, start=1):
+            ts = r["ts"].strftime("%Y/%m/%d %H:%M:%S")
+            f = ["1", ts, "012801012345", "TRAFFIC", subtype[r["action"]], "2561", ts, r["src_ip"], r["dst_ip"], "0.0.0.0", "0.0.0.0",
+                 r["rule"], r["user"] or "", "", r["application"] or "incomplete", "vsys1", "trust", "untrust", "ethernet1/1",
+                 "ethernet1/2", "Forward-Syslog", "", str(100000 + i), "1", _port(r["src_port"]), _port(r["dst_port"]), "0", "0", "0x400000",
+                 r["protocol"].lower(), _PA_ACTION[r["action"]], str(r["bytes_sent"] + r["bytes_received"]), str(r["bytes_sent"]),
+                 str(r["bytes_received"]), "10", ts, "0", "any", "", str(i), "0x0", "10.0.0.0-10.255.255.255", "United States", "", "5",
+                 "5", "aged-out", "0", "0", "0", "0", "", r["device"]]
+            buf = io.StringIO()
+            csv.writer(buf).writerow(f)
+            fh.write(f"<14>{r['ts'].strftime('%b')} {r['ts'].day:>2} {r['ts'].strftime('%H:%M:%S')} {r['device']} {buf.getvalue().strip()}\n")
     return path

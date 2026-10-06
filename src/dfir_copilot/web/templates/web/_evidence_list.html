@@ -1,11 +1,11 @@
-<div id="evidence">{% if flash %}<div class="msg {{ flash.0 }}">{{ flash.1 }}</div>{% endif %}
+<div id="evidence" {% if running %}hx-get="/proyectos/{{ project.id }}/archivos/lista/" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>{% if flash %}<div class="msg {{ flash.0 }}">{{ flash.1 }}</div>{% endif %}
 <div class="card"><h3>Archivos del análisis ({{ rows|length }})</h3>
-<table><tr><th>Archivo</th><th>Tipo</th><th>Tamaño</th><th>SHA-256</th><th>Origen</th></tr>
+<table><tr><th>Archivo</th><th>Tipo</th><th>Análisis</th><th>Tamaño</th><th>SHA-256</th><th>Origen</th></tr>
 {% for r in rows %}<tr><td><strong>{{ r.file.name }}</strong></td><td><span class="chip chip-kind-{{ r.file.kind }}">{{ r.kind_label }}</span></td>
+<td>{% if r.file.supported %}<span class="chip chip-{{ r.state|default:'pending' }}">{{ r.state_label }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
 <td>{{ r.file.size|filesizeformat }}</td><td>{% if r.sha %}<code title="{{ r.sha }}">{{ r.sha|slice:":12" }}…</code>{% else %}—{% endif %}</td>
 <td><small>{{ r.origin }}{% if r.by %} · {{ r.by }}{% endif %}{% if r.at %} · {{ r.at }}{% endif %}</small></td></tr>
-{% empty %}<tr><td colspan="5" class="muted">Todavía no hay archivos. Súbelos o elígelos del servidor.</td></tr>{% endfor %}</table>
+{% empty %}<tr><td colspan="6" class="muted">Todavía no hay archivos. Súbelos o elígelos del servidor.</td></tr>{% endfor %}</table>
 <p class="hint">Cada archivo entra en la cadena de custodia del análisis con su SHA-256, quién lo añadió, cuándo y de dónde vino.</p></div>
-<form method="post" action="/proyectos/{{ project.id }}/archivos/analizar/">{% csrf_token %}
-<button class="big" type="submit" {% if not n_logs %}disabled{% endif %}>3. Analizar {{ n_logs }} archivo(s) de log →</button>
-{% if not n_logs %}<small> Añade al menos un log (CSV, JSON, NDJSON, Parquet o un Excel).</small>{% endif %}</form></div>
+<p class="row"><a class="btn big" href="/proyectos/{{ project.id }}/">Ver el avance y los casos →</a>
+{% if running %}<span class="muted">⏳ analizando… esta lista se actualiza sola</span>{% elif not n_logs %}<small class="muted">Cada log se analiza solo en cuanto entra (CSV, JSON, NDJSON, Parquet, Excel o texto de Palo Alto / Nginx).</small>{% endif %}</p></div>

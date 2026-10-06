@@ -23,7 +23,7 @@
 </div>
 <div class="card"><h3>Hallazgos de los detectores ({{ n_findings }}) <small class="muted">calculados por código sobre la copia seudonimizada</small></h3>
 <table><tr><th>Severidad</th><th>Detector</th><th>Entidad</th><th>Resumen</th></tr>
-{% for f in findings %}<tr><td>{{ f.severity }}</td><td>{{ f.detector }}</td><td>{{ f.entity }}</td><td>{{ f.summary }}<br><small class="muted"><code>{{ f.finding_id }}</code></small></td></tr>
+{% for f in findings %}<tr><td><span class="sev sev-{{ f.severity }}">{{ f.severity }}</span></td><td>{{ f.detector }}</td><td>{{ f.entity }}</td><td>{{ f.summary }}<br><small class="muted"><code>{{ f.finding_id }}</code></small></td></tr>
 {% empty %}<tr><td colspan="4" class="muted">Los detectores todavía no se han ejecutado.</td></tr>{% endfor %}</table></div>
 {% if cands %}<div class="card"><h3>Casos candidatos (señales de varios detectores sobre la misma entidad)</h3><table><tr><th>Entidad</th><th>Señales</th><th>Severidad</th></tr>
 {% for c in cands %}<tr><td>{{ c.entity }}</td><td>{{ c.signals }}</td><td>{{ c.severity }}</td></tr>{% endfor %}</table></div>{% endif %}

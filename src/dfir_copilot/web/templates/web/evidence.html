@@ -1,7 +1,7 @@
 {% extends "web/base.html" %}{% block title %}{{ project.name }} · archivos{% endblock %}{% block content %}
 <p><a href="/proyectos/{{ project.id }}/">← {{ project.name }}</a></p>
 <h1>{{ project.name }}{% if project.ticket %} <span class="badge">{{ project.ticket }}</span>{% endif %}</h1>
-<ol class="steps"><li>1. Datos</li><li class="on">2. Archivos</li><li>3. Analizar</li></ol>
+<ol class="steps"><li class="done">1. Datos</li><li class="on">2. Archivos</li><li>3. Se analizan solos al entrar</li></ol>
 {% if project.description %}<p class="muted">{{ project.description }}</p>{% endif %}
 <div class="grid">
 <div class="card"><h3>Subir desde tu equipo</h3>
@@ -11,17 +11,19 @@
 <progress id="upprog" value="0" max="100" hidden></progress>
 <p><button type="submit">Subir</button> <span class="spin">subiendo…</span></p></form>
 <small>Hasta {{ max_mb }} MB por archivo. Logs: CSV, TSV, JSON, NDJSON, Parquet (también .gz) · Excel (.xlsx, .xls: una hoja = un caso) · PDF (se guarda como evidencia).</small></div>
-<div class="card"><h3>Elegir del servidor</h3><p class="hint">Carpetas dentro de <code>{{ data_root }}</code>.</p>
+<div class="card"><h3>Elegir del servidor</h3><p class="hint">Carpeta de entrada <code>{{ inbox }}</code>: deja ahí los archivos y márcalos.</p>
 <div id="browser" hx-get="/proyectos/{{ project.id }}/archivos/servidor/" hx-trigger="load" hx-swap="outerHTML"><span class="muted">Cargando…</span></div></div>
 </div>
 {% include "web/_evidence_list.html" %}
 <script>
-htmx.on("#upform", "htmx:xhr:progress", function (e) {
-  var p = document.getElementById("upprog"); p.hidden = false;
-  if (e.detail.lengthComputable) { p.value = Math.round(e.detail.loaded / e.detail.total * 100); }
-});
-htmx.on("#upform", "htmx:afterRequest", function () {
-  var p = document.getElementById("upprog"); p.hidden = true; p.value = 0; document.getElementById("upform").reset();
+document.addEventListener("DOMContentLoaded", function () {   // HTMX se carga con defer: los manejadores, cuando ya existe
+  htmx.on("#upform", "htmx:xhr:progress", function (e) {
+    var p = document.getElementById("upprog"); p.hidden = false;
+    if (e.detail.lengthComputable) { p.value = Math.round(e.detail.loaded / e.detail.total * 100); }
+  });
+  htmx.on("#upform", "htmx:afterRequest", function () {
+    var p = document.getElementById("upprog"); p.hidden = true; p.value = 0; document.getElementById("upform").reset();
+  });
 });
 </script>
 {% endblock %}
