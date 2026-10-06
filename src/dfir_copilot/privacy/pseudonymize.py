@@ -483,3 +483,16 @@ class Pseudonymizer:
                 if re.search(rf"(?<![{word}]){re.escape(real)}(?![{word}])", text):
                     found[(col, alias)] = {"column": col, "alias": alias}
         return list(found.values())
+
+
+_BARE_EXE = re.compile(r"^[A-Za-z0-9_.-]+\.(exe|dll|bat|cmd|ps1|com|scr|sys|msi)$", re.I)
+_PROC_COLUMNS = ("process_name", "parent_process", "command_line", "file_path")
+
+
+def real_hits(ps, text: str) -> list[dict]:
+    """Valores reales en `text`, salvo un caso: en columnas de proceso, ruta o línea de comandos, un valor que es SOLO un nombre de
+    ejecutable (`explorer.exe`, sin ruta ni argumentos) es vocabulario técnico, el mismo que la copia conserva en `<col>_base`.
+    Es lo que ocurre con los exports de Falcon, cuyo proceso padre llega como nombre suelto. Límite conocido: en `file_path`, un nombre
+    de ejecutable con datos personales (p. ej. `Setup_JuanPerez.exe`) también queda exento."""
+    return [h for h in ps.find_real(text)
+            if not (h["column"] in _PROC_COLUMNS and _BARE_EXE.match(ps.reveal_any(h["alias"]) or ""))]

@@ -24,6 +24,7 @@ import yaml
 from dfir_copilot.agent.hypotheses import HypothesisBook
 from dfir_copilot.cases import CaseWorkspace
 from dfir_copilot.engine.profiler import CanonicalProfiler
+from dfir_copilot.privacy.pseudonymize import real_hits
 from dfir_copilot.reporting.labels import t
 from dfir_copilot.timezone_status import timezone_state
 
@@ -538,7 +539,7 @@ class _Builder:
         order = ["cover", "s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "a", "b", "c", "d", "e"]
         body = "\n".join(line for k in order for line in s[k]).rstrip() + "\n"
         if self.variant == "compartible":
-            leaks = self.ps.find_real(body)
+            leaks = real_hits(self.ps, body)
             if leaks:
                 cols = sorted({x["column"] for x in leaks})
                 raise ReportLeak(f"La versión compartible contenía {len(leaks)} valor(es) real(es) de {cols}; no se entrega. "

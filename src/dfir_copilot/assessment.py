@@ -23,6 +23,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, ValidationError
 
 from dfir_copilot import incident
+from dfir_copilot.privacy.pseudonymize import real_hits  # se re-exporta: lo usa el informe del incidente
 
 VERDICTS = {"incidente_confirmado": "Incidente confirmado", "incidente_probable": "Incidente probable",
             "no_concluyente": "No concluyente", "falso_positivo": "Falso positivo"}
@@ -139,17 +140,6 @@ def build_context(project, max_chars: int = 30000) -> tuple[str, dict[str, str]]
         if real_hits(_ps(s), text):
             raise ContextLeak(f"El contexto llevaría valores reales de {s['file']}: no se envía")
     return text, refs
-
-
-_BARE_EXE = re.compile(r"^[A-Za-z0-9_.-]+\.(exe|dll|bat|cmd|ps1|com|scr|sys|msi)$", re.I)
-_PROC_COLUMNS = ("process_name", "parent_process", "command_line", "file_path")
-
-
-def real_hits(ps, text: str) -> list[dict]:
-    """Valores reales en `text`, salvo un caso: en columnas de proceso, ruta o línea de comandos, un valor que es SOLO un nombre de
-    ejecutable (`explorer.exe`, sin ruta ni argumentos) es vocabulario técnico, el mismo que la copia conserva en `<col>_base`."""
-    return [h for h in ps.find_real(text)
-            if not (h["column"] in _PROC_COLUMNS and _BARE_EXE.match(ps.reveal_any(h["alias"]) or ""))]
 
 
 def assess(project, llm, model_name: str | None = None) -> dict:
