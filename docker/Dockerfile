@@ -6,9 +6,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /workspace
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        tesseract-ocr tesseract-ocr-eng tesseract-ocr-spa \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY pyproject.toml ./
 COPY src ./src
-RUN pip install -e ".[notebook,dev,pdf,agent,openai]"
+RUN pip install -e ".[notebook,dev,pdf,agent,openai,web]"
 
 RUN useradd -m -u 1000 analyst && chown -R analyst /workspace
 USER analyst
