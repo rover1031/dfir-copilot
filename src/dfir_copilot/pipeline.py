@@ -309,6 +309,22 @@ def run_pipeline(project: Project, source: SourceFile, deps: Deps | None = None,
     return Pipeline(project, source, deps, on_update).run()
 
 
+def correlate_after(project: Project) -> None:
+    """Correlación entre fuentes al terminar un archivo: solo si el análisis tiene 2+ casos ingeridos. Un fallo aquí no tumba el análisis
+    del archivo: se deja escrito en `correlacion_error.txt` del análisis."""
+    from dfir_copilot.correlation import correlate_project
+
+    ingested = sum(1 for f in project.files() if f.supported and (project.cases_dir / f.case_id / "case.json").exists()
+                   and json.loads((project.cases_dir / f.case_id / "case.json").read_text(encoding="utf-8")).get("dataset"))
+    if ingested < 2:
+        return
+    try:
+        correlate_project(project)
+        (project.dir / "correlacion_error.txt").unlink(missing_ok=True)
+    except Exception as exc:  # noqa: BLE001
+        (project.dir / "correlacion_error.txt").write_text(f"{type(exc).__name__}: {exc}\n", encoding="utf-8")
+
+
 class PipelineRunner:
     """Lanza análisis en segundo plano (un hilo por archivo, uno a la vez por defecto). `sync=True` los ejecuta en el acto (pruebas)."""
 
@@ -335,6 +351,7 @@ class PipelineRunner:
         def job():
             try:
                 run_pipeline(project, source, deps)
+                correlate_after(project)
             finally:
                 with self._lock:
                     self._running.discard(key)

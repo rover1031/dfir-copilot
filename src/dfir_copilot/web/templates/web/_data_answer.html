@@ -2,3 +2,4 @@
 {% if a.rows %}<div style="overflow-x:auto"><table>{% if a.headers %}<tr>{% for h in a.headers %}<th>{{ h }}</th>{% endfor %}</tr>{% endif %}
 {% for r in a.rows %}<tr>{% for c in r %}<td>{{ c }}</td>{% endfor %}</tr>{% endfor %}</table></div>{% endif %}
 {% if a.sql %}<details><summary>Consulta usada (sobre la copia con alias)</summary><pre>{{ a.sql }}</pre></details>{% endif %}
+<input type="hidden" name="context" id="qa-context" value="{{ context }}" hx-swap-oob="true">

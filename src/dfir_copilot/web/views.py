@@ -142,13 +142,61 @@ def _project_rows(project: Project) -> tuple[list[dict], bool]:
     return rows, running
 
 
+def _correlation_view(project: Project, reveal: bool) -> dict | None:
+    """La correlación lista para mostrar: en alias (el diccionario de cada caso traduce lo que conoce) salvo con el interruptor."""
+    from dfir_copilot.correlation import load
+
+    corr = load(project)
+    if not corr or reveal or corr.get("status") != "ok":
+        return corr
+    pss = []
+    for c in corr.get("cases", []):
+        try:
+            pss.append(project.workspace(c["case_id"]).pseudonymized()[1])
+        except Exception:  # noqa: BLE001 - un caso que ya no abre: sus valores se muestran ocultos
+            continue
+
+    def a(value):
+        for ps in pss:
+            try:
+                out = ps.alias_text(str(value)).text
+            except Exception:  # noqa: BLE001
+                continue
+            if out != str(value):
+                return out
+        return "•••"
+
+    for pr in corr.get("pairs", []):
+        for f in pr.get("flows", []):
+            f[0], f[2] = a(f[0]), a(f[2])
+        for x in pr.get("attributions", []):
+            x["src_ip"], x["hosts"] = a(x["src_ip"]), [a(h) for h in x["hosts"]]
+            x["procesos"] = [[a(h), p, n] for h, p, n in x["procesos"]]
+            x["tambien_en_endpoint"] = [a(h) for h in x["tambien_en_endpoint"]]
+    corr.get("shared_ips", {})["top"] = [[a(ip), *rest] for ip, *rest in corr.get("shared_ips", {}).get("top", [])]
+    return corr
+
+
 @require_GET
 def project_page(request, pid):
     project = _open_project(pid)
     rows, running = _project_rows(project)
     ok, msg = get_services().model_status()
+    reveal = _reveal(request)
+    error = project.dir / "correlacion_error.txt"
     return render(request, "web/project.html", {"project": project, "rows": rows, "running": running, "settings": project.settings,
-                                                 "llm_ok": ok, "llm_msg": msg})
+                                                 "llm_ok": ok, "llm_msg": msg, "reveal": reveal, "corr": _correlation_view(project, reveal),
+                                                 "corr_error": error.read_text(encoding="utf-8") if error.exists() else None,
+                                                 "n_ingested": sum(1 for r in rows if r["has_case"])})
+
+
+@require_POST
+def project_correlate(request, pid):
+    from dfir_copilot.correlation import correlate_project
+
+    project = _open_project(pid)
+    correlate_project(project)
+    return redirect(f"/proyectos/{project.id}/")
 
 
 @require_GET
@@ -698,12 +746,20 @@ def data_question(request, pid, cid):
     path = ctx.ws.dir / "p1" / "perfil_datos.json"
     if not path.exists():
         return _msg(request, "Calcula primero el perfil de datos.", status=409)
+    from dfir_copilot.geoip import geo_db
+
     try:
         question = b.agent.preview((request.POST.get("question") or "").strip()).text
     except AmbiguousText as exc:
         return _msg(request, str(exc), status=422)
-    a = answer(question, json.loads(path.read_text(encoding="utf-8")), b.pseudo)
+    try:
+        context = json.loads(request.POST.get("context") or "null")
+    except ValueError:
+        context = None
+    # los países necesitan la IP real: se geolocaliza en local y solo sale el agregado por país
+    a = answer(question, json.loads(path.read_text(encoding="utf-8")), b.pseudo, real_engine=b.real, geo=geo_db(),
+               context=context if isinstance(context, dict) else None)
     v = _shower(b, _reveal(request))
     a.text = v(a.text)
     a.rows = [[v(x) if isinstance(x, str) else x for x in row] for row in a.rows]
-    return render(request, "web/_data_answer.html", {"a": a})
+    return render(request, "web/_data_answer.html", {"a": a, "context": json.dumps(a.context or context or {})})

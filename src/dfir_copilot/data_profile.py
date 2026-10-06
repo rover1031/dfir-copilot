@@ -29,7 +29,7 @@ PROFILE_VERSION = 2
 ENTITIES = (
     ("src_ip", "IPs de origen", ("ip de origen", "ips de origen", "ip origen", "ips origen", "source ip", "source ips", "origen")),
     ("dst_ip", "IPs de destino", ("ip de destino", "ips de destino", "ip destino", "ips destino", "destination ip", "destino")),
-    ("user_id", "usuarios", ("usuarios", "usuario", "users", "user", "cuentas", "cuenta")),
+    ("user_id", "usuarios", ("usuarios", "usuario", "users", "user", "cuentas", "cuenta", "authtokens", "authtoken", "tokens", "token")),
     ("host", "equipos / hosts", ("equipos", "equipo", "hosts", "host", "maquinas", "maquina", "dispositivos", "dispositivo")),
     ("process_name", "procesos", ("procesos", "proceso", "processes", "process", "ejecutables", "ejecutable", "binarios")),
     ("parent_process", "procesos padre", ("procesos padre", "proceso padre", "padres", "parent")),

@@ -42,3 +42,17 @@ consultan el dataset completo y muestran la consulta usada. Lo que no sabe respo
 
 El **agente recibe un resumen del perfil en cada pregunta** (no solo en el triaje): las preguntas de datos que le hagas se resuelven con
 menos pasos y menos tokens. Un perfil de la versión 1 se puede recalcular desde la propia pestaña.
+
+## Filtros, columnas derivadas, países y «dichas»
+
+* **Filtros** en la propia pregunta: una ruta («al endpoint /invoices/search») o `columna = valor` («donde action = BLOCK»).
+* **Columnas derivadas** por su nombre corto: `x_invoice_id` por «invoice_id» o «invoice», `x_site_id` por «site». «authtokens» es la
+  identidad (`user_id`) cuando el log identifica al actor por su token.
+* **Países** con una base **GeoIP local** (no incluida: descarga gratis «IP to Country Lite» de DB-IP, CSV o MMDB, y déjala en
+  `<raíz de datos>/geoip/`, o indica la ruta con `DFIR_GEOIP_DB`). Se geolocaliza en local sobre la IP real y solo sale el agregado por país.
+* **«Dichas», «esas»**: la siguiente pregunta reutiliza el filtro y el ranking de la anterior («top de países detrás de dichas IPs» = las
+  del top 20 que acabas de pedir).
+
+Las cinco preguntas del caso IDOR se responden así sin modelo (`tests/test_data_questions.py`): top 20 de IPs en /invoices/search, países
+de dichas IPs, top 10 de authtokens, invoice_id distintos (con el aviso de que el dueño de cada factura no está en el log: «usuarios
+afectados» es como mucho uno por factura) y el site con más eventos.

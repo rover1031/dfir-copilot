@@ -182,4 +182,15 @@ def refresh_profile_digest(agent, ws) -> None:
     from dfir_copilot.data_profile import digest
 
     path = ws.dir / "p1" / "perfil_datos.json"
-    agent.profile_digest = digest(json.loads(path.read_text(encoding="utf-8"))) if path.exists() else None
+    text = digest(json.loads(path.read_text(encoding="utf-8"))) if path.exists() else None
+    corr = ws.dir.parent.parent / "correlacion.json"  # <análisis>/cases/<caso> -> <análisis>/correlacion.json
+    if corr.exists():
+        from dfir_copilot.correlation import digest_for
+
+        try:
+            _, ps = ws.pseudonymized()
+            extra = digest_for(json.loads(corr.read_text(encoding="utf-8")), ps)
+        except Exception:  # noqa: BLE001 - la correlación es un extra: si falla, el agente sigue con el perfil
+            extra = None
+        text = "\n\n".join(x for x in (text, extra) if x) or None
+    agent.profile_digest = text

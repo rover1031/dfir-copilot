@@ -80,3 +80,39 @@ def test_el_mismo_codigo_sirve_para_web_firewall_y_endpoint(tmp_path, monkeypatc
     assert ("host", "process_name") in {(r["from"], r["to"]) for r in edr["relations"]}
     assert answer("top 3 procesos", edr).rows[0][0] == "rundll32.exe"                   # el ejecutable, no el alias de la ruta
     assert answer("¿Cuántos usuarios hay?", web).matched
+
+
+# --- las cinco preguntas del caso de estudio ----------------------------------------------------------------------------------
+
+@pytest.fixture()
+def idor(tmp_path, monkeypatch):
+    (tmp_path / "inbox").mkdir()
+    rows, truth = make_idor_dataset()
+    ws, pseudo, prof = analyze(tmp_path, monkeypatch, "Idor", write_csv(tmp_path / "inbox" / "three_months.csv", rows))
+    return ws, pseudo, prof, truth
+
+
+def test_las_cinco_preguntas_del_caso(idor, tmp_path):
+    from dfir_copilot.geoip import GeoDB
+
+    ws, pseudo, prof, truth = idor
+    real, (_, ps) = ws.engine(), ws.pseudonymized()
+    (tmp_path / "geo.csv").write_text("66.6.6.0,66.6.6.255,US\n")
+    geo = GeoDB(tmp_path / "geo.csv")
+    q1 = answer("¿Cuál es el top 20 de IPs que más peticiones realizaron al endpoint /invoices/search?", prof, pseudo, real_engine=real, geo=geo)
+    assert len(q1.rows) == 20 and "endpoint" in q1.sql and {ps.reveal_any(r[0]) for r in q1.rows[:2]} == set(truth.attacker_ips)
+    q2 = answer("¿Cuál es el top de países detrás de dichas IPs?", prof, pseudo, real_engine=real, geo=geo, context=q1.context)
+    assert "20 IPs del ranking anterior" in q2.text and ["US", 900, 2] in q2.rows
+    q3 = answer("¿Cuál es el top 10 de authtokens utilizados para autenticarse?", prof, pseudo)
+    assert len(q3.rows) == 10 and "authtoken" in q3.text
+    q4 = answer("¿Cuántos invoice_id fueron consultados / cuántos usuarios pudieron ser afectados?", prof, pseudo)
+    assert f"{real.query('SELECT count(DISTINCT x_invoice_id) FROM logs').rows[0][0]:,} distintos" in q4.text and "dueños" in q4.text
+    q5 = answer("¿Cuál es el site más afectado?", prof, pseudo)
+    top_site = real.query("SELECT x_site_id FROM logs GROUP BY 1 ORDER BY count(*) DESC, 1 LIMIT 1").rows[0][0]
+    assert len(q5.rows) == 1 and ps.reveal_any(q5.rows[0][0]) == top_site                          # en alias; el valor real, revelado
+
+
+def test_sin_base_geoip_explica_como_activarla(idor):
+    ws, pseudo, prof, _ = idor
+    a = answer("¿top de países de las IPs?", prof, pseudo, real_engine=ws.engine(), geo=None)
+    assert a.matched and "DB-IP" in a.text and "geoip" in a.text

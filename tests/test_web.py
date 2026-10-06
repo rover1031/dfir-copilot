@@ -578,3 +578,25 @@ def test_el_agente_de_la_interfaz_recibe_el_perfil_en_cada_pregunta(quiet):
     _, sv, _ = quiet
     b = sv.bundle(sv.case("analisis-1", "analisis-1--three-months"))
     assert "PERFIL DE DATOS" in b.agent.briefing() and "Entidades:" in b.agent.briefing()
+
+
+# --- correlación entre fuentes en la página del análisis ------------------------------------------------------------------
+
+def test_la_pagina_del_analisis_muestra_la_correlacion_en_alias(tmp_path, monkeypatch):
+    from dfir_copilot.synthetic_endpoint import make_endpoint_dataset, write_endpoint
+    from dfir_copilot.synthetic_firewall import make_firewall_dataset, write_firewall
+
+    _, inbox = make_env(tmp_path, monkeypatch, model=False)
+    fw, ft = make_firewall_dataset(hosts=12, days=31)
+    edr, et = make_endpoint_dataset(fw, ft)
+    write_firewall(fw, inbox / "firewall.csv", "paloalto")
+    write_endpoint(edr, inbox / "falcon.csv", "falcon_csv")
+    c = Client()
+    wizard(c, timezone="")                                                     # UTC, como el EDR: con otra zona no casarían (y se diría)
+    c.post("/proyectos/firewall-octubre/archivos/servidor/agregar/", {"paths": ["analisis1/firewall.csv", "analisis1/falcon.csv"], "modo": "copy"})
+    page = c.get("/proyectos/firewall-octubre/").content.decode()
+    assert "Correlación entre fuentes" in page and "rundll32.exe" in page and "desfase" in page
+    assert et.beacon_host not in page and ft.beacon_hosts[0] not in page                     # en alias por defecto
+    real = c.get("/proyectos/firewall-octubre/?reveal=1").content.decode()
+    assert et.beacon_host in real
+    assert c.post("/proyectos/firewall-octubre/correlacion/").status_code == 302

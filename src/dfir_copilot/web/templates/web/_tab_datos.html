@@ -5,6 +5,7 @@
 {% else %}
 <div class="card qa"><h3>💬 Pregúntale a los datos <small class="muted">· sin modelo, al instante, cero tokens</small></h3>
 <form hx-post="{{ base }}datos/preguntar/" hx-target="#qa-answer" hx-swap="innerHTML">{% csrf_token %}<input type="hidden" name="reveal" value="{% if reveal %}1{% else %}0{% endif %}">
+<input type="hidden" name="context" id="qa-context" value="">
 <div class="row"><input type="text" name="question" id="qa-q" placeholder="¿Cuántas IPs distintas hay?" required style="flex:1;min-width:240px">
 <button type="submit">Responder</button><span class="spin">calculando…</span></div></form>
 <p class="row examples">{% for e in qa_examples %}<a class="chip" onclick="document.getElementById('qa-q').value=this.textContent">{{ e }}</a>{% endfor %}</p>

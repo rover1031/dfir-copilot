@@ -5,4 +5,27 @@
 <p class="muted">{% if project.mode == "evidence" %}Evidencia{% else %}Carpeta{% endif %}: <code>{{ project.source_dir }}</code> · idioma {{ settings.language }} · zona {{ settings.timezone|default:"sin declarar (UTC)" }} · modelo: {% if settings.use_llm %}{% if llm_ok %}sí{% else %}sí, pero no configurado{% endif %}{% else %}no{% endif %}</p>
 <div class="row">{% if project.mode == "evidence" %}<a class="btn" href="/proyectos/{{ project.id }}/archivos/">Archivos y custodia</a>{% endif %}<form hx-post="/proyectos/{{ project.id }}/analizar/todos/" hx-target="#files" hx-swap="outerHTML">{% csrf_token %}<button class="secondary" type="submit">Analizar / reanudar todo</button></form></div>
 {% include "web/_project_files.html" %}
+{% if n_ingested >= 2 or corr %}<div class="row" style="margin-top:22px"><h2>🔗 Correlación entre fuentes</h2>
+<span class="right row"><a class="btn secondary" href="?reveal={% if reveal %}0{% else %}1{% endif %}">{% if reveal %}Ocultar valores reales{% else %}Mostrar valores reales{% endif %}</a>
+<form method="post" action="/proyectos/{{ project.id }}/correlacion/">{% csrf_token %}<button class="secondary" type="submit">Recalcular</button></form></span></div>
+{% if corr_error %}<div class="msg error">La última correlación falló: <code>{{ corr_error }}</code></div>{% endif %}
+{% if not corr %}<div class="msg info">Se calcula sola cuando termina de analizarse un archivo de este análisis (o pulsa «Recalcular»).</div>
+{% elif corr.status != "ok" %}<div class="msg info">{{ corr.reason }}</div>
+{% else %}<p class="hint">Calculada por código, en local, el {{ corr.computed_at_utc }} sobre {{ corr.cases|length }} caso(s). {% if not reveal %}Valores en alias.{% endif %}</p>
+{% for pr in corr.pairs %}{% if pr.status == "ok" %}
+<div class="entities"><div class="ent"><strong>{{ pr.matched }}</strong><span>de {{ pr.edr_events }} conexiones del endpoint casan con el firewall</span></div>
+<div class="ent"><strong>{{ pr.skew_s }} s</strong><span>desfase de relojes estimado (tolerancia ±{{ pr.tolerance_s }} s)</span></div>
+<div class="ent"><strong>{{ pr.attributions|length }}</strong><span>hallazgos del firewall atribuidos a un equipo y un proceso</span></div>
+<div class="ent"><strong>{{ corr.shared_ips.total }}</strong><span>IPs presentes en más de una fuente</span></div></div>
+<div class="card"><h3>Atribución: qué hay detrás de cada hallazgo del firewall</h3>
+<table><tr><th>Severidad</th><th>Hallazgo (firewall)</th><th>IP</th><th>Equipo · proceso (conexiones)</th><th>¿También lo señala el endpoint?</th></tr>
+{% for x in pr.attributions %}<tr><td><span class="sev sev-{{ x.severity }}">{{ x.severity }}</span></td><td>{{ x.detector }}</td><td><code>{{ x.src_ip }}</code></td>
+<td>{% for h in x.procesos %}<code>{{ h.0 }}</code> · <strong>{{ h.1 }}</strong> ({{ h.2 }}){% if not forloop.last %}<br>{% endif %}{% endfor %}</td>
+<td>{% if x.tambien_en_endpoint %}<span class="chip chip-done">sí · {{ x.tambien_en_endpoint|join:", " }}</span>{% else %}<span class="muted">no</span>{% endif %}</td></tr>
+{% empty %}<tr><td colspan="5" class="muted">Ningún hallazgo del firewall tiene su IP en el endpoint.</td></tr>{% endfor %}</table></div>
+<div class="card"><h3>Flujos más frecuentes (equipo · proceso → destino)</h3>
+<table><tr><th>Equipo</th><th>Proceso</th><th>Destino</th><th>Conexiones</th><th>Casan con el firewall</th><th>Acción del firewall</th></tr>
+{% for f in pr.flows|slice:":12" %}<tr><td><code>{{ f.0 }}</code></td><td><strong>{{ f.1 }}</strong></td><td><code>{{ f.2 }}</code>:{{ f.3 }}</td><td>{{ f.4 }}</td><td>{{ f.5 }}</td><td>{{ f.6|join:", " }}</td></tr>{% endfor %}</table></div>
+{% else %}<div class="msg info">{{ pr.reason }}</div>{% endif %}{% empty %}<div class="msg info">No hay un par firewall + endpoint con conexiones: solo se calcularon las IPs compartidas ({{ corr.shared_ips.total }}).</div>{% endfor %}
+{% endif %}{% endif %}
 {% endblock %}

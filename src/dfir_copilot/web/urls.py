@@ -32,6 +32,7 @@ urlpatterns = [
     path("proyectos/<str:pid>/archivos/analizar/", views.evidence_analyze, name="evidence_analyze"),
     path("proyectos/<str:pid>/", views.project_page, name="project"),
     path("proyectos/<str:pid>/estado/", views.project_status, name="project_status"),
+    path("proyectos/<str:pid>/correlacion/", views.project_correlate, name="project_correlate"),
     path("proyectos/<str:pid>/analizar/<str:cid>/", views.project_run, name="project_run"),
 ]
 for route, view, name in CASE_ROUTES:
