@@ -1,7 +1,8 @@
 {% extends "web/base.html" %}{% block title %}{{ project.name }}{% endblock %}{% block content %}
 <p><a href="/">← Proyectos</a></p>
-<h1>{{ project.name }}</h1>
-<p class="muted">Carpeta: <code>{{ project.source_dir }}</code> · idioma {{ settings.language }} · zona {{ settings.timezone|default:"sin declarar (UTC)" }} · modelo: {% if settings.use_llm %}{% if llm_ok %}sí{% else %}sí, pero no configurado{% endif %}{% else %}no{% endif %}</p>
-<div class="row"><form hx-post="/proyectos/{{ project.id }}/analizar/todos/" hx-target="#files" hx-swap="outerHTML">{% csrf_token %}<button class="secondary" type="submit">Analizar / reanudar todo</button></form></div>
+<h1>{{ project.name }}{% if project.ticket %} <span class="badge">{{ project.ticket }}</span>{% endif %}</h1>
+{% if project.description %}<p>{{ project.description }}</p>{% endif %}
+<p class="muted">{% if project.mode == "evidence" %}Evidencia{% else %}Carpeta{% endif %}: <code>{{ project.source_dir }}</code> · idioma {{ settings.language }} · zona {{ settings.timezone|default:"sin declarar (UTC)" }} · modelo: {% if settings.use_llm %}{% if llm_ok %}sí{% else %}sí, pero no configurado{% endif %}{% else %}no{% endif %}</p>
+<div class="row">{% if project.mode == "evidence" %}<a class="btn" href="/proyectos/{{ project.id }}/archivos/">Archivos y custodia</a>{% endif %}<form hx-post="/proyectos/{{ project.id }}/analizar/todos/" hx-target="#files" hx-swap="outerHTML">{% csrf_token %}<button class="secondary" type="submit">Analizar / reanudar todo</button></form></div>
 {% include "web/_project_files.html" %}
 {% endblock %}

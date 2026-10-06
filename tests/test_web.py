@@ -383,3 +383,95 @@ def test_el_servidor_real_analiza_en_segundo_plano_con_csrf(live):
     with pytest.raises(urllib.error.HTTPError) as exc:                                       # sin token CSRF: 403
         urllib.request.urlopen(out, timeout=10)
     assert exc.value.code == 403
+
+
+# --- asistente "Nuevo análisis" (entrega A) -------------------------------------------------------------------------------
+
+def wizard(client, **extra):
+    data = {"name": "Firewall octubre", "ticket": "INC-77", "description": "borde norte", "analyst": "eder", "language": "es",
+            "timezone": "America/Santiago", "max_tokens": "210000", **extra}           # sin use_llm: análisis 100 % local
+    return client.post("/analisis/nuevo/", data)
+
+
+def test_el_inicio_lleva_al_asistente_y_conserva_el_modo_carpeta(tmp_path, monkeypatch):
+    make_env(tmp_path, monkeypatch, model=False)
+    page = Client().get("/").content.decode()
+    assert "Nuevo análisis" in page and 'href="/analisis/nuevo/"' in page and "Carpeta con los archivos" in page
+
+
+def test_el_asistente_crea_el_analisis_y_pasa_a_los_archivos(tmp_path, monkeypatch):
+    make_env(tmp_path, monkeypatch, model=False)
+    c = Client()
+    assert "Nombre del análisis" in c.get("/analisis/nuevo/").content.decode()
+    r = wizard(c)
+    assert r.status_code == 302 and r["Location"] == "/proyectos/firewall-octubre/archivos/"
+    page = c.get(r["Location"]).content.decode()
+    assert "Subir desde tu equipo" in page and "Elegir del servidor" in page and "INC-77" in page and "borde norte" in page
+    assert c.post("/analisis/nuevo/", {"name": "", "language": "es"}).status_code == 400
+    assert wizard(c).status_code == 400                                          # mismo nombre: no pisa el análisis existente
+
+
+def test_subir_elegir_del_servidor_analizar_y_custodia(tmp_path, monkeypatch):
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    _, inbox = make_env(tmp_path, monkeypatch, model=False)
+    c = Client()
+    wizard(c)
+    base = "/proyectos/firewall-octubre/archivos/"
+    up = c.post(base + "subir/", {"files": [SimpleUploadedFile("acceso.csv", (inbox / "three_months.csv").read_bytes()),
+                                            SimpleUploadedFile("x.exe", b"MZ")]})
+    html = up.content.decode()
+    assert up.status_code == 200 and "acceso.csv" in html and "x.exe" in html and "no admitido" in html
+    listing = c.get(base + "servidor/?ruta=inbox/analisis1").content.decode()
+    assert "three_months.csv" in listing and "notas.txt" in listing
+    assert c.get(base + "servidor/?ruta=../..").status_code == 400
+    assert ">📁 projects<" not in c.get(base + "servidor/").content.decode()   # la carpeta interna de proyectos no se ofrece
+    add = c.post(base + "servidor/agregar/", {"paths": ["inbox/analisis1/three_months.csv", "../../etc/passwd"], "modo": "copy"})
+    html = add.content.decode()
+    assert "three_months.csv" in html and "No se pudo" in html and "etc/passwd" in html
+    r = c.post(base + "analizar/")
+    assert r.status_code == 302 and r["Location"] == "/proyectos/firewall-octubre/"
+    page = c.get(r["Location"]).content.decode()
+    assert page.count("Abrir caso") == 2 and "Archivos y custodia" in page and "INC-77" in page
+    assert Project.open("firewall-octubre").verify_custody()["ok"]
+
+
+def test_el_limite_de_tamano_y_csrf_protegen_la_subida(tmp_path, monkeypatch):
+    from django.core.files.uploadedfile import SimpleUploadedFile
+    from django.test import override_settings
+
+    make_env(tmp_path, monkeypatch, model=False)
+    c = Client()
+    wizard(c)
+    base = "/proyectos/firewall-octubre/archivos/"
+    with override_settings(DFIR_MAX_UPLOAD_MB=0):
+        r = c.post(base + "subir/", {"files": [SimpleUploadedFile("a.csv", b"x\n1\n")]})
+    assert r.status_code == 400 and "límite" in r.content.decode() and Project.open("firewall-octubre").files() == []
+    strict = Client(enforce_csrf_checks=True)
+    assert strict.post(base + "subir/", {"files": [SimpleUploadedFile("a.csv", b"x\n1\n")]}).status_code == 403
+    assert strict.post(base + "servidor/agregar/", {"paths": ["inbox/analisis1/three_months.csv"]}).status_code == 403
+
+
+def test_un_proyecto_por_carpeta_no_admite_subidas(tmp_path, monkeypatch):
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    _, inbox = make_env(tmp_path, monkeypatch, model=False)
+    c = Client()
+    create_project(c, inbox, use_llm="")
+    assert c.get("/proyectos/analisis-1/archivos/").status_code == 302
+    assert c.post("/proyectos/analisis-1/archivos/subir/", {"files": [SimpleUploadedFile("a.csv", b"x\n")]}).status_code == 404
+
+
+def test_confirmar_la_zona_desde_el_caso(tmp_path, monkeypatch):
+    _, inbox = make_env(tmp_path, monkeypatch, model=False)
+    c = Client()
+    wizard(c)
+    c.post("/proyectos/firewall-octubre/archivos/servidor/agregar/", {"paths": ["inbox/analisis1/three_months.csv"], "modo": "copy"})
+    c.post("/proyectos/firewall-octubre/archivos/analizar/")
+    cid = Project.open("firewall-octubre").files()[0].case_id
+    case = f"/proyectos/firewall-octubre/casos/{cid}/"
+    assert "Confirmar la zona horaria" in c.get(case + "tab/resumen/").content.decode()
+    bad = c.post(case + "zona/", {"timezone": "America/Bogota", "basis": "analyst_decision", "analyst": "eder"}).content.decode()
+    assert "reingestar" in bad
+    ok = c.post(case + "zona/", {"timezone": "America/Santiago", "basis": "analyst_decision", "analyst": "eder"}).content.decode()
+    assert "registrada como: decisión del analista, sin confirmación externa" in ok and "(eder," in ok

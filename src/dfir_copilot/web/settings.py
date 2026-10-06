@@ -47,3 +47,14 @@ TIME_ZONE = "UTC"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 X_FRAME_OPTIONS = "DENY"
 SECURE_CONTENT_TYPE_NOSNIFF = True
+
+# Subidas: a partir de 4 MB, Django las vuelca a disco por trozos. La carpeta temporal va en la raíz de datos (mismo disco: no llena el
+# disco del sistema con un log de varios GB). El tamaño máximo por archivo se puede cambiar con DFIR_WEB_MAX_UPLOAD_MB.
+FILE_UPLOAD_MAX_MEMORY_SIZE = 4 * 1024 * 1024
+DATA_UPLOAD_MAX_NUMBER_FILES = 50
+DFIR_MAX_UPLOAD_MB = int(os.environ.get("DFIR_WEB_MAX_UPLOAD_MB", "4096"))
+try:
+    FILE_UPLOAD_TEMP_DIR = str(data_root() / ".uploads_tmp")
+    Path(FILE_UPLOAD_TEMP_DIR).mkdir(parents=True, exist_ok=True)
+except OSError:
+    FILE_UPLOAD_TEMP_DIR = None

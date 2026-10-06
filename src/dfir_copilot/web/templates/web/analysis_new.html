@@ -1,0 +1,21 @@
+{% extends "web/base.html" %}{% block title %}Nuevo análisis{% endblock %}{% block content %}
+<p><a href="/">← Inicio</a></p>
+<h1>Nuevo análisis</h1>
+<ol class="steps"><li class="on">1. Datos</li><li>2. Archivos</li><li>3. Analizar</li></ol>
+{% if error %}<div class="msg error">{{ error }}</div>{% endif %}
+<form class="card" method="post" action="/analisis/nuevo/">{% csrf_token %}
+<div class="grid">
+<div><label>Nombre del análisis *</label><input type="text" name="name" value="{{ form.name }}" placeholder="Firewall borde octubre" required autofocus></div>
+<div><label>Ticket o número de caso</label><input type="text" name="ticket" value="{{ form.ticket }}" placeholder="INC-1234 (opcional)"></div>
+<div><label>Analista</label><input type="text" name="analyst" value="{{ form.analyst }}" placeholder="tu nombre"></div>
+<div><label>Zona horaria de las horas de los archivos</label><input type="text" name="timezone" value="{{ form.timezone }}" list="zones" placeholder="America/Santiago">
+<datalist id="zones">{% for z in zones %}<option value="{{ z }}">{% endfor %}</datalist>
+<small>Vacía: se asume UTC y queda «sin verificar». Si el dato trae su propia zona, se usa la del dato.</small></div>
+<div><label>Idioma del informe</label><select name="language"><option value="es" {% if form.language == "es" %}selected{% endif %}>Español</option><option value="en" {% if form.language == "en" %}selected{% endif %}>English</option></select></div>
+<div><label>Tope de tokens por pregunta</label><input type="number" name="max_tokens" value="{{ form.max_tokens }}" min="1000"></div>
+</div>
+<label>Descripción</label><textarea name="description" placeholder="Qué se investiga y por qué (opcional)">{{ form.description }}</textarea>
+<label class="inline"><input type="checkbox" name="use_llm" {% if form.use_llm %}checked{% endif %}> Usar el modelo (interpretación del perfil y triaje del agente; gasta API). Sin marcar, el análisis es 100 % local.</label>
+<p><button class="big" type="submit">Crear y elegir archivos →</button></p>
+</form>
+{% endblock %}

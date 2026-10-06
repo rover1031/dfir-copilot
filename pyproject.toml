@@ -12,6 +12,8 @@ dependencies = [
     "pyarrow>=15",
     "pandas>=2.2",
     "pyyaml>=6",
+    "openpyxl>=3.1",  # Excel .xlsx (análisis por hojas)
+    "xlrd>=2.0",      # Excel antiguo .xls
     "pydantic>=2.6",
     "typer>=0.12",
 ]

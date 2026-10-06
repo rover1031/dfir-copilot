@@ -6,13 +6,15 @@ import json
 import re
 from collections import Counter
 
+from django.conf import settings as django_settings
 from django.http import FileResponse, Http404, HttpResponse
 from django.shortcuts import redirect, render
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from dfir_copilot.privacy import AmbiguousText
-from dfir_copilot.projects import Project, ProjectError, ProjectSettings, data_root
+from dfir_copilot.projects import Project, ProjectError, ProjectSettings, browse, data_root
 from dfir_copilot.reporting import ReportError, export_report, reports_root
+from dfir_copilot.timezone_status import BASES, TimezoneError, confirm_timezone, timezone_state
 from dfir_copilot.web.services import Busy, NotFound, get_services
 
 TABS = ("resumen", "hipotesis", "preguntar", "notas", "informe", "integridad")
@@ -58,7 +60,7 @@ def _home_context(extra: dict | None = None) -> dict:
     projects = []
     for p in Project.list():
         states = Counter((p.status(f.case_id) or {}).get("state", "pending") for f in p.files() if f.supported)
-        projects.append({"id": p.id, "name": p.name, "files": len(p.files()), "states": dict(states)})
+        projects.append({"id": p.id, "name": p.name, "ticket": p.ticket, "files": len(p.files()), "states": dict(states)})
     ok, msg = sv.model_status()
     return {"projects": projects, "legacy": sv.legacy_cases(), "llm_ok": ok, "llm_msg": msg, "data_root": data_root(),
             "form": {"language": "es", "max_tokens": 210000, "use_llm": True}, **(extra or {})}
@@ -76,6 +78,8 @@ def project_create(request):
             "timezone": p.get("timezone", ""), "analyst": p.get("analyst", ""), "use_llm": p.get("use_llm") == "on",
             "max_tokens": p.get("max_tokens") or 210000}
     try:
+        if not form["source_dir"].strip():
+            raise ProjectError("Escribe la carpeta del servidor, o usa «Nuevo análisis» para subir o elegir archivos")
         settings = ProjectSettings(language=form["language"], timezone=form["timezone"].strip() or None,
                                    analyst=form["analyst"].strip() or None, use_llm=form["use_llm"], max_tokens=int(form["max_tokens"]))
         project = Project.create(form["name"], form["source_dir"], settings)
@@ -179,7 +183,8 @@ def _tab_resumen(ctx, b, reveal):
         interp = json.loads((p1 / "interpretacion.json").read_text(encoding="utf-8"))
     if (p1 / "consultas.json").exists():
         explored = json.loads((p1 / "consultas.json").read_text(encoding="utf-8"))
-    return {"ds": ds, "tz": man.get("timezone", {}), "roles": man.get("roles") or {}, "findings": findings[:40],
+    return {"ds": ds, "tz": man.get("timezone", {}), "tzs": timezone_state(b.ledger, man), "tz_bases": BASES,
+            "analyst": ctx.settings.analyst or "", "roles": man.get("roles") or {}, "findings": findings[:40],
             "n_findings": len(findings), "cands": cands[:10], "interp": interp, "explored": explored,
             "pipeline": ctx.project.status(ctx.ws.case_id) if ctx.project else None}
 
@@ -387,3 +392,153 @@ def download(request, pid, cid, filename):
 
 def healthz(request):
     return HttpResponse("ok", content_type="text/plain")
+
+
+# --- asistente "Nuevo análisis": datos -> archivos -> analizar ----------------------------------------------------------
+
+COMMON_ZONES = ("America/Santiago", "America/Bogota", "America/Lima", "America/Guayaquil", "America/Panama", "America/Santo_Domingo",
+                "America/Mexico_City", "America/Argentina/Buenos_Aires", "UTC")
+_KIND_LABEL = {"log": "log", "excel": "Excel (por hojas)", "document": "documento", "other": "no admitido"}
+
+
+@require_http_methods(["GET", "POST"])
+def analysis_new(request):
+    form = {"name": "", "ticket": "", "description": "", "analyst": "", "language": "es", "timezone": "", "use_llm": True,
+            "max_tokens": 210000}
+    if request.method == "POST":
+        p = request.POST
+        form = {"name": p.get("name", ""), "ticket": p.get("ticket", ""), "description": p.get("description", ""),
+                "analyst": p.get("analyst", ""), "language": p.get("language", "es"), "timezone": p.get("timezone", ""),
+                "use_llm": p.get("use_llm") == "on", "max_tokens": p.get("max_tokens") or 210000}
+        try:
+            settings = ProjectSettings(language=form["language"], timezone=form["timezone"].strip() or None,
+                                       analyst=form["analyst"].strip() or None, use_llm=form["use_llm"], max_tokens=int(form["max_tokens"]))
+            project = Project.create(form["name"], None, settings, ticket=form["ticket"], description=form["description"])
+        except (ProjectError, ValueError) as exc:
+            return render(request, "web/analysis_new.html", {"form": form, "error": str(exc), "zones": COMMON_ZONES}, status=400)
+        return redirect(f"/proyectos/{project.id}/archivos/")
+    return render(request, "web/analysis_new.html", {"form": form, "zones": COMMON_ZONES})
+
+
+def _evidence_rows(project: Project) -> list[dict]:
+    last = {}
+    for e in project.custody():
+        if e["action"] in ("added", "derived"):
+            last[e["file"]] = e
+    rows = []
+    for f in project.files():
+        e = last.get(f.name, {})
+        if e.get("action") == "derived":
+            origin = f"derivado de {e['derived_from']['file']}, hoja «{e.get('sheet')}» ({e.get('rows', 0):,} filas)"
+        elif e.get("origin") == "upload":
+            origin = f"subido desde tu equipo ({e.get('origin_name') or f.name})"
+        elif e.get("origin") == "server":
+            origin = f"del servidor: {e.get('origin_path')} ({'copiado' if e.get('mode') == 'copy' else 'enlazado'})"
+        else:
+            origin = "—"
+        rows.append({"file": f, "kind_label": _KIND_LABEL.get(f.kind, f.kind), "sha": e.get("sha256"), "origin": origin,
+                     "by": e.get("analyst"), "at": e.get("at_utc")})
+    return rows
+
+
+def _evidence_list(request, project: Project, flash: tuple | None = None, status: int = 200):
+    rows = _evidence_rows(project)
+    return render(request, "web/_evidence_list.html", {"project": project, "rows": rows, "flash": flash,
+                                                         "n_logs": sum(1 for r in rows if r["file"].supported)}, status=status)
+
+
+def _open_evidence_project(pid: str) -> Project:
+    project = _open_project(pid)
+    if project.mode != "evidence":
+        raise Http404("Este análisis vincula una carpeta del servidor; no admite añadir archivos")
+    return project
+
+
+@require_GET
+def evidence_page(request, pid):
+    project = _open_project(pid)
+    if project.mode != "evidence":
+        return redirect(f"/proyectos/{project.id}/")
+    rows = _evidence_rows(project)
+    return render(request, "web/evidence.html", {"project": project, "rows": rows, "n_logs": sum(1 for r in rows if r["file"].supported),
+                                                 "max_mb": django_settings.DFIR_MAX_UPLOAD_MB, "data_root": data_root()})
+
+
+@require_POST
+def evidence_upload(request, pid):
+    project = _open_evidence_project(pid)
+    files = request.FILES.getlist("files")
+    if not files:
+        return _evidence_list(request, project, ("error", "Elige al menos un archivo"), status=400)
+    added, errors = [], []
+    limit = django_settings.DFIR_MAX_UPLOAD_MB * (1 << 20)
+    for f in files:
+        try:
+            recs = project.add_upload(f.name, f.chunks(), analyst=project.settings.analyst, max_bytes=limit)
+            added += [r["file"] for r in recs if r["action"] in ("added", "derived")]
+            errors += [f"{r['file']}: {r['error']}" for r in recs if r["action"] == "derivation_failed"]
+        except ProjectError as exc:
+            errors.append(f"{f.name}: {exc}")
+    return _evidence_list(request, project, _flash(added, errors), status=200 if added or not errors else 400)
+
+
+def _flash(added: list[str], errors: list[str]) -> tuple:
+    parts = []
+    if added:
+        parts.append(f"Añadidos: {', '.join(added)}.")
+    if errors:
+        parts.append("No se pudo: " + "; ".join(errors))
+    return ("error" if errors and not added else "ok" if not errors else "info", " ".join(parts))
+
+
+@require_GET
+def evidence_browse(request, pid):
+    project = _open_evidence_project(pid)
+    try:
+        listing = browse(request.GET.get("ruta", ""))
+    except ProjectError as exc:
+        return _msg(request, str(exc), status=400)
+    return render(request, "web/_server_browser.html", {"project": project, "b": listing})
+
+
+@require_POST
+def evidence_add(request, pid):
+    project = _open_evidence_project(pid)
+    paths = [p for p in request.POST.getlist("paths") if p.strip()]
+    mode = request.POST.get("modo", "copy")
+    if not paths:
+        return _evidence_list(request, project, ("error", "Marca al menos un archivo"), status=400)
+    added, errors = [], []
+    for rel in paths:
+        try:
+            recs = project.add_from_server(data_root() / rel, mode=mode, analyst=project.settings.analyst)
+            added += [r["file"] for r in recs if r["action"] in ("added", "derived")]
+            errors += [f"{r['file']}: {r['error']}" for r in recs if r["action"] == "derivation_failed"]
+        except ProjectError as exc:
+            errors.append(f"{rel}: {exc}")
+    return _evidence_list(request, project, _flash(added, errors), status=200 if added or not errors else 400)
+
+
+@require_POST
+def evidence_analyze(request, pid):
+    project = _open_evidence_project(pid)
+    sv = get_services()
+    for f in project.files():
+        if f.supported:
+            sv.runner.submit(project, f, sv.deps)
+    return redirect(f"/proyectos/{project.id}/")
+
+
+# --- zona horaria del caso -----------------------------------------------------------------------------------------------
+
+@require_POST
+def timezone_confirm(request, pid, cid):
+    ctx = _ctx(pid, cid)
+    b = _bundle(ctx)
+    p = request.POST
+    try:
+        data = confirm_timezone(b.ledger, b.real.manifest or {}, p.get("timezone", ""), p.get("basis", ""), p.get("analyst"), p.get("note"))
+    except TimezoneError as exc:
+        return _render_tab(request, ctx, "resumen", ("error", str(exc)))
+    return _render_tab(request, ctx, "resumen", ("ok", f"Zona {data['timezone']} registrada como: {data['basis_text']}. "
+                                                       "No cambia ningún dato; queda en el ledger y el informe lo dirá así."))

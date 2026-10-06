@@ -1,0 +1,11 @@
+<div id="browser">
+<p class="row"><small>Carpeta: <code>/{{ b.rel }}</code></small>
+{% if b.parent is not None %}<a class="btn secondary" hx-get="/proyectos/{{ project.id }}/archivos/servidor/?ruta={{ b.parent|urlencode }}" hx-target="#browser" hx-swap="outerHTML">↑ Subir</a>{% endif %}</p>
+{% for d in b.dirs %}<a class="chip" hx-get="/proyectos/{{ project.id }}/archivos/servidor/?ruta={{ d.rel|urlencode }}" hx-target="#browser" hx-swap="outerHTML">📁 {{ d.name }}</a>{% endfor %}
+<form hx-post="/proyectos/{{ project.id }}/archivos/servidor/agregar/" hx-target="#evidence" hx-swap="outerHTML">{% csrf_token %}
+<table>{% for f in b.files %}<tr><td><label class="inline"><input type="checkbox" name="paths" value="{{ f.rel }}" {% if f.kind == "other" %}disabled{% endif %}> {{ f.name }}</label></td>
+<td><small>{{ f.size|filesizeformat }}</small></td><td><small>{% if f.kind == "other" %}no admitido{% else %}{{ f.kind }}{% endif %}</small></td></tr>
+{% empty %}<tr><td class="muted">No hay archivos en esta carpeta.</td></tr>{% endfor %}</table>
+{% if b.files %}<label class="inline"><input type="radio" name="modo" value="copy" checked> Copiar al análisis (recomendado: la evidencia no depende del original)</label><br>
+<label class="inline"><input type="radio" name="modo" value="link"> Enlazar (archivos muy grandes: no duplica espacio, pero depende del original)</label>
+<p><button type="submit">Añadir los marcados</button> <span class="spin">copiando…</span></p>{% endif %}</form></div>

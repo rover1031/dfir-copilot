@@ -1,9 +1,19 @@
+{% if flash %}<div class="msg {{ flash.0 }}">{{ flash.1 }}</div>{% endif %}
 {% if pipeline %}<div class="card"><strong>Análisis automático</strong> <span class="muted">· {{ pipeline.state }}</span><br>
 {% for name, s in pipeline.steps.items %}<span class="chip chip-{{ s.status }}" title="{{ s.message }}">{{ name }}</span>{% endfor %}</div>{% endif %}
 <div class="grid">
 <div class="card"><h3>Datos</h3><table>
 <tr><td>Filas</td><td>{{ ds.input_rows }}</td></tr><tr><td>Rango (UTC)</td><td>{{ ds.time_range_utc.0 }} → {{ ds.time_range_utc.1 }}</td></tr>
-<tr><td>Zona horaria</td><td><code>{{ tz.assumed }}</code> — {% if tz.verified %}verificada{% else %}<strong>sin verificar</strong>{% endif %}</td></tr>
+<tr><td>Zona horaria</td><td><code>{{ tzs.assumed }}</code> — {% if tzs.state == "in_data" %}viene en el propio dato{% elif tzs.state == "verified" %}verificada
+{% elif tzs.confirmation %}{{ tzs.confirmation.basis_text }} <small class="muted">({{ tzs.confirmation.confirmed_by|default:"—" }}, {{ tzs.confirmation.ts_utc }})</small>
+{% else %}<strong>sin verificar</strong>{% endif %}
+{% if tzs.state != "in_data" and tzs.state != "verified" %}<details><summary class="muted">{% if tzs.confirmation %}Cambiar la base de la confirmación{% else %}Confirmar la zona horaria{% endif %}</summary>
+<form hx-post="{{ base }}zona/" hx-target="#tab" hx-swap="innerHTML">{% csrf_token %}<input type="hidden" name="timezone" value="{{ tzs.assumed }}">
+<label>Base</label><select name="basis">{% for k, v in tz_bases.items %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select>
+<label>Quién confirma</label><input type="text" name="analyst" value="{{ analyst }}">
+<label>Nota</label><input type="text" name="note" placeholder="p. ej. acordado en la reunión de cierre">
+<p class="hint">No cambia ningún dato (las horas ya se convirtieron con esta zona): queda en el ledger y el informe lo dirá tal cual.</p>
+<button type="submit">Registrar</button></form></details>{% endif %}</td></tr>
 <tr><td>Actor / recurso</td><td><code>{{ roles.actor }}</code> / <code>{{ roles.resource }}</code></td></tr></table></div>
 {% if interp and interp.ok %}<div class="card"><h3>Interpretación del perfil (modelo)</h3>
 <p>Tipo de log: <strong>{{ interp.interpretation.classification.log_type }}</strong> · confianza {{ interp.interpretation.classification.confidence|floatformat:2 }}<br>

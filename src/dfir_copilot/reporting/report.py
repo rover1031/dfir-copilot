@@ -25,6 +25,7 @@ from dfir_copilot.agent.hypotheses import HypothesisBook
 from dfir_copilot.cases import CaseWorkspace
 from dfir_copilot.engine.profiler import CanonicalProfiler
 from dfir_copilot.reporting.labels import t
+from dfir_copilot.timezone_status import timezone_state
 
 VARIANTS = ("interno", "compartible")
 LANGS = ("es", "en")
@@ -281,7 +282,9 @@ class _Builder:
     def data(self) -> list[str]:
         ds, tz = self._opened["dataset"], self._manifest.get("timezone", {})
         verified, source = tz.get("verified"), tz.get("source") or ds.get("timezone_source")
+        conf = timezone_state(self.ledger, self._manifest)["confirmation"]
         tz_state = (self.L("d.tz.in_data") if source == "in_data" else self.L("d.tz.verified") if verified
+                    else self.L(f"d.tz.{conf['basis']}", who=self.cell(conf.get("confirmed_by") or "—"), when=conf["ts_utc"]) if conf
                     else self.L("d.tz.default") if source == "default" else self.L("d.tz.unverified"))
         try:
             fmt = yaml.safe_load(self.ws.mapping_path.read_text(encoding="utf-8")).get("timestamp", {}).get("format", "—")
@@ -409,8 +412,10 @@ class _Builder:
 
     def limitations(self) -> list[str]:
         out = [f"## 7. {self.L('s7')}", ""]
-        tz = self._manifest.get("timezone", {})
-        if not tz.get("verified") and tz.get("source") != "in_data":
+        state = timezone_state(self.ledger, self._manifest)["state"]
+        if state == "analyst_decision":
+            out += [f"- {self.L('l.tz.analyst')}"]
+        elif state not in ("in_data", "verified", "export_owner"):
             out += [f"- {self.L('l.tz')}"]
         nulls, nrows = self._manifest.get("null_counts", {}), self._manifest.get("output", {}).get("rows")
         empty = sorted(c for c, n in nulls.items() if nrows and n == nrows)

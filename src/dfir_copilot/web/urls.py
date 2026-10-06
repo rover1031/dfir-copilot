@@ -13,12 +13,19 @@ CASE_ROUTES = [
     ("notas/", views.note, "case_note"),
     ("informe/exportar/", views.export, "case_export"),
     ("informe/descargar/<str:filename>/", views.download, "case_download"),
+    ("zona/", views.timezone_confirm, "case_timezone"),
 ]
 
 urlpatterns = [
     path("", views.home, name="home"),
     path("healthz", views.healthz, name="healthz"),
+    path("analisis/nuevo/", views.analysis_new, name="analysis_new"),
     path("proyectos/nuevo/", views.project_create, name="project_create"),
+    path("proyectos/<str:pid>/archivos/", views.evidence_page, name="evidence"),
+    path("proyectos/<str:pid>/archivos/subir/", views.evidence_upload, name="evidence_upload"),
+    path("proyectos/<str:pid>/archivos/servidor/", views.evidence_browse, name="evidence_browse"),
+    path("proyectos/<str:pid>/archivos/servidor/agregar/", views.evidence_add, name="evidence_add"),
+    path("proyectos/<str:pid>/archivos/analizar/", views.evidence_analyze, name="evidence_analyze"),
     path("proyectos/<str:pid>/", views.project_page, name="project"),
     path("proyectos/<str:pid>/estado/", views.project_status, name="project_status"),
     path("proyectos/<str:pid>/analizar/<str:cid>/", views.project_run, name="project_run"),

@@ -90,3 +90,34 @@ crear el proyecto). Con "usar el modelo" apagado, el análisis es 100 % local y 
 `done`, `needs_attention` (terminó y hay algo que revisar), `skipped`, `failed` (error: se corrige y **Reanalizar** reanuda) y
 `unsupported` (el formato o el tipo de log todavía no se sabe ingerir: **no es un error** y reanalizar no cambia nada). El botón
 **Abrir caso** solo aparece cuando el archivo llegó a ingerirse.
+
+## Nuevo análisis (asistente) y evidencia
+
+**+ Nuevo análisis** en el inicio abre un asistente de tres pasos:
+
+1. **Datos**: nombre, ticket o caso, analista, zona horaria de las horas de los archivos, idioma, si usa el modelo y con qué tope, y una descripción.
+2. **Archivos** (uno o más), por dos caminos que se pueden combinar:
+   * *Subir desde tu equipo*: arrastrar y soltar o elegir, con barra de progreso. Límite por archivo: `DFIR_WEB_MAX_UPLOAD_MB` (4096 por defecto).
+   * *Elegir del servidor*: navegar las carpetas de la raíz de datos y marcar archivos. **Copiar** (recomendado: la evidencia no depende del
+     original) o **enlazar** (archivos muy grandes: no duplica espacio, pero si alguien toca el original la custodia lo detectará).
+3. **Analizar**: arranca el análisis automático de cada log, igual que antes.
+
+Cada análisis tiene su carpeta: `<raíz de datos>/projects/<análisis>/evidencia/`. Todo lo que entra queda en `custodia.jsonl`, encadenado por
+hash: archivo, SHA-256, tamaño, origen (subido o ruta del servidor, copiado o enlazado), quién y cuándo. `Project.verify_custody()` comprueba
+que nadie editó la custodia y que cada archivo sigue teniendo su SHA-256.
+
+| Tipo | Qué pasa |
+|---|---|
+| CSV, TSV, JSON, NDJSON, Parquet (y `.gz`) | se analiza como log (un caso por archivo) |
+| Excel `.xlsx`, `.xls` | se guarda como evidencia y **cada hoja con datos se convierte en un CSV derivado** que se analiza como un caso. Las fechas salen legibles (`2026-10-04 23:02:59`), no como número de serie de Excel; la custodia registra de qué archivo y de qué hoja sale cada CSV |
+| PDF | se guarda como evidencia (con su hash); **no es un log** y no se analiza como tal |
+| Otros | se rechazan sin dejar rastro |
+
+Los nombres de archivo se sanean (sin rutas, sin caracteres raros) y nunca se pisa un archivo existente: el segundo `fw.csv` se guarda como
+`fw-2.csv`. Ninguna ruta sale de la raíz de datos, ni con `..` ni con enlaces.
+
+## Confirmar la zona horaria
+
+En **Resumen** de un caso con la zona «sin verificar», *Confirmar la zona horaria* registra en el ledger la base de la confirmación:
+**decisión del analista, sin confirmación externa** o **confirmada por el dueño del export**, con quién y cuándo. No cambia ningún dato (las
+horas ya se convirtieron con esa zona) y el informe lo dice tal cual, con su limitación. Para usar OTRA zona hay que reingestar.

@@ -30,3 +30,9 @@ pre, code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:1
 .answer { white-space:pre-wrap; } .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; } .right { margin-left:auto; }
 .htmx-request .spin { display:inline; } .spin { display:none; color:var(--muted); }
 .big { font-size:16px; padding:9px 18px; }
+.steps { display:flex; gap:8px; padding:0; margin:0 0 12px; list-style:none; } .steps li { padding:4px 12px; border-radius:999px; background:#eef2f6; color:var(--muted); font-size:13px; }
+.steps li.on { background:var(--accent); color:#fff; font-weight:600; }
+.drop { display:block; border:2px dashed #b2ccff; border-radius:10px; padding:22px; text-align:center; background:#f5f8ff; cursor:pointer; font-weight:500; }
+.drop input { display:block; margin:0 auto 8px; } progress { width:100%; height:10px; }
+.chip-kind-log { color:var(--ok); border-color:#abefc6; } .chip-kind-excel { color:#027a48; border-color:#a6f4c5; background:#f6fef9; }
+.chip-kind-document { color:#6941c6; border-color:#d9d6fe; background:#f4f3ff; } details summary { cursor:pointer; margin:6px 0; }

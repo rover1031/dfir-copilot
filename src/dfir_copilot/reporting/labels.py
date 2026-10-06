@@ -46,6 +46,9 @@ _L: dict[str, tuple[str, str]] = {
     "d.tz.verified": ("verificada con el dueño del export", "verified with the export owner"),
     "d.tz.default": ("no declarada: se asumió UTC (sin verificar)", "not declared: UTC assumed (unverified)"),
     "d.tz.in_data": ("viene en el propio dato", "carried by the data itself"),
+    "d.tz.analyst_decision": ("decisión del analista, SIN confirmación externa ({who}, {when})",
+                              "analyst's decision, WITHOUT external confirmation ({who}, {when})"),
+    "d.tz.export_owner": ("confirmada por el dueño del export ({who}, {when})", "confirmed by the export owner ({who}, {when})"),
     "d.date_format": ("Formato de fecha del mapping", "Mapping date format"),
     "d.roles": ("Roles de análisis", "Analysis roles"), "d.actor": ("actor (quién actúa)", "actor (who acts)"),
     "d.resource": ("recurso (sobre qué actúa)", "resource (what is acted on)"),
@@ -95,6 +98,10 @@ _L: dict[str, tuple[str, str]] = {
     "o.none": ("No hay hipótesis abiertas.", "No open hypotheses."), "o.retired": ("Retiradas por el analista", "Retired by the analyst"),
     "o.superseded": ("reemplazada por {h}", "superseded by {h}"), "o.reason": ("Motivo", "Reason"),
     # limitaciones
+    "l.tz.analyst": ("La zona horaria es una decisión del analista, sin confirmación externa. Si fuera otra, las horas se desplazarían "
+                     "y con ellas lo que dependa de la hora del día o de los límites de día; los conteos y los conjuntos no dependen de ella.",
+                     "The time zone is the analyst's decision, without external confirmation. If it were another zone, times would shift and "
+                     "so would anything that depends on time of day or day boundaries; counts and sets do not depend on it."),
     "l.tz": ("La zona horaria de las horas del archivo NO está verificada. Los resultados que dependen de la hora del día, de los fines "
              "de semana o de los límites de día pueden desplazarse; los conteos, los conjuntos de identificadores y de IPs no dependen de ella.",
              "The time zone of the file's times is NOT verified. Results that depend on time of day, weekends or day boundaries may shift; "
