@@ -23,6 +23,40 @@ Funciona sin clave de API: todo lo local (perfil, ingesta, detectores, correlaci
 El detalle, con sus límites medidos, está en [docs/capacidades.md](docs/capacidades.md). Un informe real de ejemplo:
 [docs/ejemplos/informe_idor_compartible.md](docs/ejemplos/informe_idor_compartible.md).
 
+## Cómo está construido
+
+```mermaid
+flowchart LR
+  L[Logs: web, firewall, endpoint] --> I[Perfil e ingesta<br/>esquema canónico]
+  I --> DB[(DuckDB + Parquet)]
+  DB --> DT[Detectores y correlación]
+  DB --> PS[Copia seudonimizada<br/>con alias]
+  PS --> AG[Agente LangGraph<br/>herramientas acotadas]
+  AG <--> M[Modelo: Claude u OpenAI<br/>opcional]
+  DT --> LG[Ledger con hashes]
+  AG --> LG
+  LG --> R[Informes interno<br/>y compartible]
+  PDF[PDF] --> OCR[PyMuPDF / Tesseract] --> IOC[IOCs validados<br/>y búsqueda BM25] --> CH[Chat con citas verificadas]
+```
+
+| Componente | Tecnología | Papel |
+|---|---|---|
+| Lenguaje | Python 3.12 | Todo el código (`src/dfir_copilot`) |
+| Datos | DuckDB + Parquet | Motor SQL analítico local, sin servidor: cada log se ingiere a Parquet y se consulta con SQL |
+| Perfil y esquema | pandas, pyarrow, pydantic, mapeos YAML | Perfil estadístico por campo y mapeo de cada formato a un esquema canónico |
+| Privacidad | Seudonimización propia | Copia con alias que es lo único que ve el modelo; el diccionario de alias queda local |
+| Evidencia | Ledger propio | Consultas, hallazgos, hipótesis y decisiones encadenados por hashes y reejecutables |
+| Agente | LangGraph + LangChain | Bucle con herramientas de solo lectura, hipótesis falsables y aprobación humana |
+| Modelo (opcional) | Claude (Anthropic) u OpenAI | Interpretación, triaje, preguntas, valoración y chat con documentos |
+| Documentos | PyMuPDF, Tesseract OCR, BM25 propio | Lectura de PDF con y sin texto, IOCs validados y búsqueda de pasajes |
+| Interfaz | Django + HTMX | Web local en el puerto 8000 |
+| Exploración | JupyterLab | Cuadernos de cada fase en el puerto 8888 |
+| Despliegue | Docker + Docker Compose | Dos servicios (`web` y `lab`) con la misma imagen |
+
+No usa base de datos vectorial ni embeddings: las consultas sobre los logs son SQL exacto y la búsqueda en documentos es léxica (BM25).
+Así los resultados son reproducibles y auditables, y el contenido no se envía a ningún servicio de embeddings. El detalle de la
+arquitectura está en [docs/arquitectura_p0.md](docs/arquitectura_p0.md) y las versiones exactas en [docs/instalado.md](docs/instalado.md).
+
 ## Requisitos
 
 - **Docker** con **Docker Compose v2** (Docker Desktop en Windows/macOS, o Docker Engine en Linux). En Windows, con WSL2.
