@@ -10,3 +10,5 @@ __pycache__/
 *.zip
 *:Zone.Identifier
 reports/diagnostico-*.md
+.env.*
+!.env.example
