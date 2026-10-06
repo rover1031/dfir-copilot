@@ -31,7 +31,8 @@ El detalle, con sus límites medidos, está en [docs/capacidades.md](docs/capaci
 
 ## Instalación
 
-Desde una terminal (en Windows, la de WSL):
+> **En Windows:** todos los comandos van en la terminal de **WSL (Ubuntu)**, no en PowerShell ni en CMD, y el repositorio se clona
+> **dentro de WSL** (por ejemplo en `~/projects`), no en `C:\` ni en `/mnt/c/…`: allí los permisos y el rendimiento dan problemas.
 
 ```bash
 git clone https://github.com/rover1031/dfir-copilot.git
@@ -44,20 +45,33 @@ DFIR_UID=$(id -u) docker compose up -d --build
 La primera construcción tarda unos minutos. `DFIR_UID` hace que el usuario del contenedor sea el tuyo, para que pueda escribir en la
 carpeta del proyecto (en WSL suele ser 1000, el valor por defecto).
 
+Al terminar quedan **dos servicios en marcha** (compruébalo con `docker compose ps`):
+
+| Servicio | Dirección | Para qué |
+|---|---|---|
+| `web` | **http://127.0.0.1:8000** | La interfaz: análisis, casos, documentos, papelera |
+| `lab` | **http://127.0.0.1:8888** | Jupyter, con los cuadernos de cada fase |
+
+**Entrar en Jupyter:** pide el enlace con su token y ábrelo tal cual:
+
+```bash
+docker compose exec lab jupyter server list
+```
+
+El token es `JUPYTER_TOKEN` de tu `.env` (por defecto `cambia-este-token`; cámbialo si quieres). Si el navegador da un error de
+credenciales o de `_xsrf`, abre el enlace en una ventana privada: suele ser una sesión guardada de otra instancia en el mismo puerto.
+
 ## Probarlo en dos minutos
 
 ```bash
-docker compose exec lab python tools/demo.py                              # datos sintéticos, sin modelo
-docker compose exec lab python -m dfir_copilot.web --host 0.0.0.0 --restart
+docker compose exec lab python tools/demo.py        # datos sintéticos, sin modelo
 ```
 
-Abre **http://127.0.0.1:8000**. Verás dos análisis:
+Abre (o recarga) **http://127.0.0.1:8000**. Verás dos análisis:
 
 - **Demo IDOR**: un log web con una explotación IDOR plantada en `/invoices/search` (el caso de estudio del proyecto).
 - **Demo incidente**: firewall + endpoint del mismo entorno con una cadena maliciosa que la correlación une, y un boletín PDF con IOCs
   ficticios (direcciones de documentación y dominios `.test`, que no existen).
-
-Jupyter, con los cuadernos de cada fase, está en **http://127.0.0.1:8888** (el token es `JUPYTER_TOKEN` de tu `.env`).
 
 ## Usarlo con tus datos
 
@@ -70,8 +84,8 @@ encadenado de eliminaciones (ver [docs/papelera.md](docs/papelera.md)).
 
 ## Modelo de lenguaje (opcional)
 
-Pon tu clave en `.env` (`ANTHROPIC_API_KEY`, o `LLM_PROVIDER=openai` y `OPENAI_API_KEY`) y reinicia el contenedor
-(`docker compose up -d`). El modelo se usa para interpretar perfiles, el triaje del agente, las preguntas en lenguaje natural, la
+Pon tu clave en `.env` (`ANTHROPIC_API_KEY`, o `LLM_PROVIDER=openai` y `OPENAI_API_KEY`) y recrea los servicios para que la lean
+(`docker compose up -d --force-recreate`). El modelo se usa para interpretar perfiles, el triaje del agente, las preguntas en lenguaje natural, la
 valoración del incidente y el chat con documentos. Hay tope de tokens por pregunta, por caso y por análisis. Con documentos, el envío de
 pasajes al modelo hay que **permitirlo documento a documento**.
 
@@ -102,7 +116,11 @@ data/               datos y análisis (NO se versiona)
 reports/            informes exportados (NO se versiona)
 ```
 
-## Seguridad al contribuir
+## Contribuir
+
+Pruebas, estilo y cómo publicar una versión: [CONTRIBUTING.md](CONTRIBUTING.md).
+
+### Seguridad
 
 `.env` y `data/` están fuera de git. Para bloquear además cualquier commit que lleve un `.env` o algo con forma de clave de API:
 
@@ -116,8 +134,10 @@ cp tools/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
 |---|---|
 | `env file .env not found` | Falta `cp .env.example .env` |
 | `Permission denied` al crear análisis | `data/` quedó de root: `sudo chown -R $(id -u):$(id -g) data` y reconstruye con `DFIR_UID=$(id -u) docker compose up -d --build` |
-| La web no abre o el puerto está ocupado | `docker compose exec lab python -m dfir_copilot.web --host 0.0.0.0 --restart` (o `--port 8001`) |
-| «No hay un modelo configurado» | Normal sin clave; pon la clave en `.env` y `docker compose up -d` |
+| La web no responde en 127.0.0.1:8000 | Mira su registro con `docker compose logs --tail 50 web` y reiníciala con `docker compose restart web`. Desde WSL, `curl -sI http://127.0.0.1:8000/` debe dar `200`; si responde ahí pero no en el navegador de Windows, prueba `http://localhost:8000` |
+| `port is already allocated` | Otra instancia usa el puerto 8000 u 8888: detenla (`docker compose down` en su carpeta) antes de levantar esta |
+| No puedo entrar en Jupyter | Usa el enlace de `docker compose exec lab jupyter server list`, en una ventana privada del navegador |
+| «No hay un modelo configurado» | Normal sin clave; pon la clave en `.env` y `docker compose up -d --force-recreate` |
 | Un PDF escaneado no da hashes en la lista de bloqueo | Es intencionado: lo leído por OCR queda «sin verificar» hasta contrastarlo con una fuente de texto (ver [docs/documentos.md](docs/documentos.md)) |
 
 ## Licencia y terceros

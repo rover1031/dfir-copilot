@@ -1,14 +1,27 @@
+# Dos servicios con la misma imagen: Jupyter (lab, puerto 8888) y la interfaz web (web, puerto 8000).
+# `docker compose up -d` deja los dos en marcha. Los puertos solo se publican en 127.0.0.1 (esta máquina).
+x-build: &build
+  context: .
+  dockerfile: docker/Dockerfile
+  args:
+    UID: ${DFIR_UID:-1000}
+
+x-common: &common
+  env_file: .env
+  volumes:
+    - .:/workspace
+    - ./data/raw:/workspace/data/raw:ro
+
 services:
   lab:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
-      args:
-        UID: ${DFIR_UID:-1000}
+    <<: *common
+    build: *build
     ports:
       - "127.0.0.1:8888:8888"
+  web:
+    <<: *common
+    build: *build
+    command: ["python", "-m", "dfir_copilot.web", "--host", "0.0.0.0"]
+    ports:
       - "127.0.0.1:8000:8000"
-    env_file: .env
-    volumes:
-      - .:/workspace
-      - ./data/raw:/workspace/data/raw:ro
+    restart: unless-stopped

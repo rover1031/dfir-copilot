@@ -2,13 +2,13 @@
 
 Empieza por el [README del repositorio](../README.md) (instalación y demo). Aquí, la documentación por tema.
 
-## Para usar y evaluar
+## Para empezar
 
 | Documento | Contenido |
 |---|---|
 | [capacidades.md](capacidades.md) | Qué hace cada parte, qué preguntas responde y sus límites medidos |
-| [entrega.md](entrega.md) | Lista de comprobación para evaluar el proyecto, con resultados esperados |
 | [instalado.md](instalado.md) | Entorno de referencia: versiones exactas y qué instala cada extra |
+| [../CONTRIBUTING.md](../CONTRIBUTING.md) | Pruebas, gancho contra secretos y cómo publicar una versión |
 | [interfaz_web.md](interfaz_web.md) | La interfaz local (Django + HTMX) |
 | [ejemplos/informe_idor_compartible.md](ejemplos/informe_idor_compartible.md) | Un informe real, variante compartible, del caso de estudio |
 

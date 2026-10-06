@@ -1,0 +1,12 @@
+# Solo pyproject.toml y src/ entran en la imagen; el resto se monta como volumen. Esto evita enviar datos y secretos al construir.
+.git
+.env
+.env.*
+data
+reports
+notebooks
+**/__pycache__
+.pytest_cache
+.ruff_cache
+.ipynb_checkpoints
+*.zip

@@ -23,7 +23,7 @@ Resumen de lo que hace el proyecto, con sus límites declarados. Cada sección e
 | Endpoint | CrowdStrike Falcon CSV, Sysmon ECS NDJSON | Cadenas de procesos; la copia del modelo no lleva rutas con usuario, líneas de comandos ni equipos, sí el ejecutable y señales técnicas | [endpoint.md](endpoint.md) |
 | Incidente (varias fuentes) | Firewall + endpoint | Correlación con estimación de desfase de relojes, línea de tiempo con procedencia, valoración con citas verificadas, tope de tokens del incidente | [correlacion.md](correlacion.md), [incidente.md](incidente.md) |
 | Documentos | PDF con texto o escaneado | IOCs validados, OCR, países, resumen extractivo, verificación contra fuente, chat con citas | [documentos.md](documentos.md) |
-| Informes | Markdown | Variante interna (valores reales y diccionario) y compartible (alias; el código bloquea la entrega si detecta un valor real) | [informe.md](informe.md) |
+| Informes | Markdown | Variante interna (valores reales y diccionario) y compartible (alias; el código no la exporta si detecta un valor real) | [informe.md](informe.md) |
 
 ## Límites conocidos
 

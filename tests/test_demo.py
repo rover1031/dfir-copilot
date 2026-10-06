@@ -1,4 +1,4 @@
-"""La demostración que correrá el evaluador funciona de punta a punta con datos sintéticos y sin modelo: crea los dos análisis, analiza cada
+"""La demostración del README funciona de punta a punta con datos sintéticos y sin modelo: crea los dos análisis, analiza cada
 log, lee el boletín PDF y no pisa un análisis existente salvo que se pida."""
 import importlib.util
 from pathlib import Path
