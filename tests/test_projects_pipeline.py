@@ -294,3 +294,22 @@ def test_un_log_de_otro_tipo_se_declara_no_soportado_y_no_como_error(tmp_path):
     assert "no soportado" in st["steps"]["draft"]["message"]
     case_json = project.cases_dir / project.files()[0].case_id / "case.json"
     assert not (json.loads(case_json.read_text(encoding="utf-8")).get("dataset") if case_json.exists() else None)   # no se ingirió nada
+
+
+def test_un_archivo_que_antes_no_se_soportaba_se_analiza_entero_al_reanalizar(tmp_path):
+    """Regresión: tras detenerse en 'draft', las etapas siguientes quedaban 'skipped' y nunca se reintentaban (el triaje corría sin datos)."""
+    from dfir_copilot.synthetic_firewall import make_firewall_dataset, write_firewall
+
+    inbox = tmp_path / "inbox" / "x"
+    inbox.mkdir(parents=True)
+    (inbox / "log.csv").write_text("timestamp,qname,qtype,client\n2026-10-04 10:00:00,example.com,A,10.0.0.1\n", encoding="utf-8")
+    project = Project.create("Reintento", inbox, ProjectSettings(analyst="eder", use_llm=False), root=tmp_path / "projects", base=tmp_path)
+    first = run_pipeline(project, project.files()[0], Deps())
+    assert first["state"] == "unsupported" and all(first["steps"][s]["status"] == "skipped" for s in STEPS[1:])
+    rows, _ = make_firewall_dataset(hosts=20, days=35)
+    write_firewall(rows, inbox / "log.csv", "generic_es")                     # el mismo archivo, ahora con un formato que sí se soporta
+    st = run_pipeline(project, project.files()[0], Deps())
+    steps = {k: v["status"] for k, v in st["steps"].items()}
+    assert steps["draft"] in ("done", "needs_attention") and steps["ingest"] in ("done", "needs_attention"), st
+    assert steps["copy"] == "done" and steps["detectors"] == "done" and st["state"] in ("done", "needs_attention")
+    assert project.workspace(project.files()[0].case_id).meta["dataset"]

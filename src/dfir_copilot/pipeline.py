@@ -131,8 +131,8 @@ class Pipeline:
             prev = self.state["steps"][step]["status"]
             if prev in ("done", "needs_attention"):
                 continue  # ya hecho en una ejecución anterior (con su aviso, si lo tuvo)
-            if prev == "skipped" and step not in ("interpret", "triage"):
-                continue  # las etapas del modelo se reintentan: quizá ahora sí hay clave configurada
+            # Un "skipped" se reintenta SIEMPRE: puede ser porque no había modelo (quizá ahora sí) o porque una etapa anterior se detuvo
+            # (formato que antes no se soportaba). Las etapas son idempotentes, así que reintentar lo ya resuelto no cuesta nada.
             self._set(step, "running")
             try:
                 status, message = getattr(self, f"_step_{step}")()
