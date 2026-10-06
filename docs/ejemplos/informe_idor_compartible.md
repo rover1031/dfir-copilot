@@ -1,3 +1,8 @@
+> **Ejemplo real generado por DFIR Co-pilot** — variante *compartible* del informe del caso de estudio
+> (explotación de un IDOR en `/invoices/search`, dataset externo de tráfico de prueba sin relación con ninguna organización).
+> Los valores sensibles van como alias y el diccionario de alias no se incluye; el código comprobó que no lleva ningún valor real.
+> La zona horaria (`America/Santiago`) la decidió el analista sin confirmación externa, y así consta en el propio informe.
+
 # Informe forense · IDOR-INVOICES-2020Q4-TZ-SANTIAGO
 
 > **COMPARTIBLE** — Los valores sensibles van seudonimizados (alias) y el diccionario de alias NO se incluye. Se comprobó que ningún valor real conocido aparece en el documento.

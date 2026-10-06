@@ -1,0 +1,9 @@
+#!/bin/sh
+# Gancho de git: bloquea el commit si incluye un .env o algo con forma de clave de API (los valores marcados FAKE de las pruebas se permiten).
+# Instalar: cp tools/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+if git diff --cached --name-only | grep -E '(^|/)\.env(\..+)?$' | grep -qvE '(^|/)\.env\.example$'; then
+  echo "BLOQUEADO: intentas versionar un archivo .env"; exit 1
+fi
+if git diff --cached -U0 | grep -E '^\+' | grep -v FAKE | grep -qE 'sk-ant-[A-Za-z0-9_-]{20,}|sk-proj-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}'; then
+  echo "BLOQUEADO: el commit contiene algo con forma de clave de API. Ponla en .env, que no se versiona."; exit 1
+fi

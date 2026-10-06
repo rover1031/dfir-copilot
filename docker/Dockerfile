@@ -14,7 +14,8 @@ COPY pyproject.toml ./
 COPY src ./src
 RUN pip install -e ".[notebook,dev,pdf,agent,openai,web]"
 
-RUN useradd -m -u 1000 analyst && chown -R analyst /workspace
+ARG UID=1000
+RUN useradd -m -u ${UID} analyst && chown -R analyst /workspace
 USER analyst
 
 EXPOSE 8888
