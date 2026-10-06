@@ -43,7 +43,7 @@ def test_construye_el_cliente_de_anthropic_sin_filtrar_la_clave():
     pytest.importorskip("langchain_anthropic")
     llm = make_llm(env={"ANTHROPIC_API_KEY": "sk-ant-FAKE-pruebas-1234"})
     assert type(llm).__name__ == "ChatAnthropic" and llm.model == "claude-sonnet-5-5"
-    assert "sk-ant-prueba" not in repr(llm)
+    assert "sk-ant-FAKE-pruebas-1234" not in repr(llm)
 
 
 def test_construye_el_cliente_de_openai():
@@ -54,7 +54,7 @@ def test_construye_el_cliente_de_openai():
 
 def test_mask_secret():
     assert mask_secret(None) == "(no definida)" and mask_secret("corta") == "****"
-    assert mask_secret("sk-ant-FAKE-pruebas-1234") == "…3456"
+    assert mask_secret("sk-ant-FAKE-pruebas-1234") == "…1234"
 
 
 def test_la_temperatura_solo_se_envia_si_se_configura():
