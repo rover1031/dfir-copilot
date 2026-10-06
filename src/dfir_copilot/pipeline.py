@@ -28,7 +28,7 @@ from datetime import UTC, datetime
 from dfir_copilot.projects import Project, SourceFile
 from dfir_copilot.tools.sanitize import clean_text
 
-STEPS = ("draft", "interpret", "ingest", "copy", "detectors", "explore", "triage")
+STEPS = ("draft", "interpret", "ingest", "copy", "profile", "detectors", "explore", "triage")
 STEP_STATUS = ("pending", "running", "done", "skipped", "needs_attention", "unsupported", "failed")
 
 TRIAGE_QUESTION = {
@@ -105,6 +105,9 @@ class Pipeline:
         self.ws = project.workspace(source.case_id, create=True)
         self.p1 = self.ws.dir / "p1"
         self.state = project.status(source.case_id) or new_status(source)
+        # un estado guardado por una versión anterior no conoce las etapas nuevas: se añaden como pendientes, en su orden
+        blank = new_status(source)["steps"]
+        self.state["steps"] = {st: self.state["steps"].get(st, blank[st]) for st in STEPS}
         self._draft = None
         self._interpretation = None
 
@@ -243,6 +246,37 @@ class Pipeline:
         summary = summarize_runs(runs)
         return "done", f"{summary['accepted']} consulta(s) ejecutadas en local · {summary['accepted_but_failed']} fallida(s)"
 
+    def _step_profile(self):
+        """El desglose de ingeniero de datos (local, sobre la copia con alias): ver `data_profile`."""
+        from dfir_copilot.data_profile import build_profile, save_profile
+
+        path = self.p1 / "perfil_datos.json"
+        ledger = self.ws.ledger(self.ws.engine())
+        if path.exists() and ledger.entries("data_profile"):
+            return "done", "perfil ya calculado"
+        pseudo, _ = self.ws.pseudonymized()
+        prof = build_profile(pseudo)
+        sha = save_profile(prof, path)
+        ledger.append("data_profile", {"file": "p1/perfil_datos.json", "sha256": sha, "rows": prof["rows"],
+                                       "columns": len(prof["columns"]), "copy": pseudo.copy_id})
+        q = prof["quality"]
+        return "done", (f"{prof['rows']:,} filas · {len(prof['columns'])} columnas · {q['duplicate_rows']:,} duplicada(s)"
+                        + (f" · {len(q['empty_columns'])} columna(s) vacía(s)" if q["empty_columns"] else ""))
+
+    def _triage_question(self) -> tuple[str, tuple]:
+        """La pregunta del triaje más el resumen del perfil (en alias). Las cifras del resumen las calculó el código: se marcan como
+        literales para que el guardián de privacidad no las confunda con identificadores."""
+        question = TRIAGE_QUESTION[self.settings.language]
+        path = self.p1 / "perfil_datos.json"
+        if not path.exists():
+            return question, ()
+        import re
+
+        from dfir_copilot.data_profile import digest
+
+        text = digest(json.loads(path.read_text(encoding="utf-8")))
+        return f"{question}\n\n{text}", tuple(sorted(set(re.findall(r"\d[\d.,:+-]*\d|\d", text))))
+
     def _step_triage(self):
         if not self.settings.use_llm:
             return "skipped", "el proyecto no usa el modelo"
@@ -262,7 +296,8 @@ class Pipeline:
         s = self.settings
         agent = build_agent(pseudo, ledger, llm, analyst=s.analyst, max_steps=14, max_tokens=s.max_tokens,
                             max_tokens_case=s.max_tokens_case, pseudonymizer=ps, checkpointer=self.ws.checkpointer())
-        r = agent.ask(TRIAGE_QUESTION[s.language])
+        question, literal = self._triage_question()
+        r = agent.ask(question, literal=literal)
         if r.status == "needs_approval":
             return "needs_attention", f"{len(r.approvals)} hipótesis pendiente(s) de tu aprobación · {r.tokens:,} tokens"
         return "done", f"triaje completado · {r.tokens:,} tokens" + (f" · cortado por {r.cut_by}" if r.cut_by else "")

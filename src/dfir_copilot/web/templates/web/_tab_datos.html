@@ -1,0 +1,27 @@
+{% if flash %}<div class="msg {{ flash.0 }}">{{ flash.1 }}</div>{% endif %}
+{% if not profile %}<div class="card"><h3>Perfil de datos</h3><p class="muted">Este caso todavía no tiene el perfil (se creó antes de esta etapa).</p>
+<form hx-post="{{ base }}perfil/" hx-target="#tab" hx-swap="innerHTML">{% csrf_token %}<button type="submit">Calcular el perfil</button> <span class="spin">calculando sobre el dataset completo…</span>
+<small class="muted"> Local y sin modelo.</small></form></div>
+{% else %}
+<div class="grid">
+<div class="card"><h3>Dataset</h3><table><tr><td>Filas</td><td><strong>{{ profile.rows }}</strong></td></tr><tr><td>Columnas</td><td>{{ profile.columns|length }}</td></tr>
+{% if profile.time %}<tr><td>Rango (UTC)</td><td><small>{{ profile.time.from_utc }} → {{ profile.time.to_utc }}</small></td></tr>{% endif %}</table></div>
+<div class="card"><h3>Calidad del dato</h3><table><tr><td>Filas duplicadas</td><td>{{ profile.quality.duplicate_rows }}</td></tr>
+{% if profile.quality.unreadable_times is not None %}<tr><td>Horas ilegibles</td><td>{{ profile.quality.unreadable_times }}</td></tr>{% endif %}
+<tr><td>Columnas vacías</td><td><small>{{ profile.quality.empty_columns|join:", "|default:"ninguna" }}</small></td></tr></table></div>
+{% for ip in profile.ips %}<div class="card"><h3>IPs · <code>{{ ip.column }}</code></h3><table><tr><th>Alcance</th><th>Eventos</th><th>Distintas</th></tr>
+{% for s in ip.scopes %}<tr><td>{{ s.0 }}</td><td>{{ s.1 }}</td><td>{{ s.2 }}</td></tr>{% endfor %}</table></div>{% endfor %}
+</div>
+{% if profile.time %}<div class="card"><h3>Eventos por día <small class="muted">({{ profile.time.zone }})</small></h3>
+<div class="bars">{% for d in profile.time.days %}<div class="bar" style="height:{{ d.pct }}%" title="{{ d.d }}: {{ d.n }}"></div>{% endfor %}</div>
+{% with last=profile.time.days|last %}<small class="muted">{{ profile.time.days.0.d }} → {{ last.d }}</small>{% endwith %}
+<h3>Eventos por hora del día <small class="muted">({{ profile.time.zone }})</small></h3>
+<div class="bars hours">{% for h in profile.time.hours %}<div class="bar" style="height:{{ h.pct }}%" title="{{ h.h }}:00 → {{ h.n }}"><span>{{ h.h }}</span></div>{% endfor %}</div>
+<h3>Huecos más largos sin eventos</h3><p class="hint">Hueco típico entre eventos: {{ profile.time.median_gap_s }} s. Un hueco largo puede ser una caída del recolector, un borrado o simplemente la noche: compáralo con el patrón por hora.</p>
+<table><tr><th>Desde (UTC)</th><th>Hasta (UTC)</th><th>Segundos</th></tr>{% for g in profile.time.largest_gaps %}<tr><td>{{ g.0 }}</td><td>{{ g.1 }}</td><td>{{ g.2 }}</td></tr>{% endfor %}</table></div>{% endif %}
+<div class="card"><h3>Campos</h3><p class="hint">Calculado por código sobre el dataset completo. Los valores salen en alias salvo que actives «Mostrar valores reales».</p>
+<table><tr><th>Campo</th><th>Tipo</th><th>Con valor</th><th>Distintos</th><th>Más frecuentes</th></tr>
+{% for c in profile.columns %}<tr><td><code>{{ c.name }}</code></td><td><small>{{ c.type }}</small></td><td>{{ c.filled_pct }} %</td><td>{{ c.distinct }}</td>
+<td><small>{% if c.unique_per_row %}un valor distinto por fila (identificador){% else %}{% for t in c.top|slice:":5" %}<code>{{ t.0 }}</code> ×{{ t.1 }}{% if not forloop.last %} · {% endif %}{% endfor %}{% endif %}
+{% if c.stats %}<br>mín {{ c.stats.min }} · p50 {{ c.stats.p50 }} · p95 {{ c.stats.p95 }} · máx {{ c.stats.max }}{% endif %}</small></td></tr>{% endfor %}</table></div>
+{% endif %}

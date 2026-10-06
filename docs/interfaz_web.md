@@ -121,3 +121,13 @@ Los nombres de archivo se sanean (sin rutas, sin caracteres raros) y nunca se pi
 En **Resumen** de un caso con la zona «sin verificar», *Confirmar la zona horaria* registra en el ledger la base de la confirmación:
 **decisión del analista, sin confirmación externa** o **confirmada por el dueño del export**, con quién y cuándo. No cambia ningún dato (las
 horas ya se convirtieron con esa zona) y el informe lo dice tal cual, con su limitación. Para usar OTRA zona hay que reingestar.
+
+## Decidir las propuestas del agente
+
+En **Hipótesis**, cada propuesta pendiente tiene su propio Aprobar/Rechazar y su nota: se deciden por separado y se registran juntas con
+«Registrar decisiones» (una propuesta sin decidir no se rechaza en silencio: la interfaz la pide). Por defecto las decisiones se registran
+**al instante y sin llamar al modelo**; la casilla «que el agente siga investigando» lo reanuda con tus decisiones (más lento y gasta tokens).
+
+## Pestaña Datos
+
+El perfil de ingeniero de datos del caso (campos, IPs por alcance, eventos por día y hora, huecos, calidad del dato). Ver `docs/perfil_datos.md`.

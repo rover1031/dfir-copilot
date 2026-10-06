@@ -14,7 +14,7 @@ import django  # noqa: E402
 django.setup()
 from conftest import ScriptedChat  # noqa: E402
 from django.test import Client  # noqa: E402
-from test_agent import FULL, call, say  # noqa: E402
+from test_agent import FULL, HID, call, say  # noqa: E402
 from test_privacy_agent import _case  # noqa: E402
 
 from dfir_copilot.pipeline import Deps  # noqa: E402
@@ -166,9 +166,10 @@ def test_la_pestana_de_hipotesis_enseña_lo_que_hay_que_decidir(env):
     assert "count(DISTINCT user_id)" in page and "Aprobar" in page and "Rechazar" in page
 
 
-def test_aprobar_desde_la_interfaz_reanuda_al_agente_y_traduce_la_nota(env):
+def test_aprobar_y_continuar_reanuda_al_agente_y_traduce_la_nota(env):
     client, _, _ = env
-    r = client.post(CASE + "decidir/", {"decision": "approve", "note": "Aprobada solo en lo observable; atacante00 usa 66.6.6.1"})
+    r = client.post(CASE + "decidir/", {f"decision_{HID}": "approve", f"note_{HID}": "Aprobada solo en lo observable; atacante00 usa 66.6.6.1",
+                                        "continue": "on"})
     body = r.content.decode()
     assert r.status_code == 200 and "Respuesta del agente" in body and "atacante00" not in body       # el agente ve alias
     hyp = client.get(CASE + "tab/hipotesis/").content.decode()
@@ -177,16 +178,29 @@ def test_aprobar_desde_la_interfaz_reanuda_al_agente_y_traduce_la_nota(env):
 
 def test_rechazar_deja_la_hipotesis_en_prueba(env):
     client, _, _ = env
-    client.post(CASE + "decidir/", {"decision": "reject", "note": "El intento no puede refutarla"})
+    client.post(CASE + "decidir/", {f"decision_{HID}": "reject", f"note_{HID}": "El intento no puede refutarla"})
     hyp = client.get(CASE + "tab/hipotesis/").content.decode()
     assert "en_prueba" in hyp and "confirmada" not in hyp
 
 
-def test_una_decision_no_valida_o_sin_pendientes_se_explica(quiet):
+def test_registrar_sin_continuar_es_inmediato_y_no_llama_al_modelo(env):
+    client, sv, _ = env
+    r = client.post(CASE + "decidir/", {f"decision_{HID}": "approve", f"note_{HID}": "Revisado: el intento podía salir distinto"})
+    body = r.content.decode()
+    assert r.status_code == 200 and "sin reanudar al agente" in body and "Respuesta del agente" not in body   # sin trabajo en 2.º plano
+    assert "confirmada" in body and "Esperando tu decisión" not in body
+    assert "Respuesta" in client.post(CASE + "preguntar/", {"question": "¿Y ahora?"}).content.decode()       # se puede seguir preguntando
+
+
+def test_una_decision_que_falta_se_explica_y_no_registra_nada(env):
+    client, _, _ = env
+    body = client.post(CASE + "decidir/", {f"decision_{HID}": "quizas", f"note_{HID}": "x"}).content.decode()
+    assert "Falta tu decisión" in body and "Esperando tu decisión" in body                  # nada se registró: sigue pendiente
+
+
+def test_decidir_sin_propuestas_pendientes_se_explica(quiet):
     client, _, _ = quiet
-    assert client.post(CASE + "decidir/", {"decision": "quizas", "note": "x"}).status_code == 400
-    r = client.post(CASE + "decidir/", {"decision": "approve", "note": "x"})
-    assert r.status_code == 409 and "ninguna aprobación pendiente" in r.content.decode()
+    assert "No hay ninguna propuesta pendiente" in client.post(CASE + "decidir/", {"x": "y"}).content.decode()
 
 
 def test_preguntar_traduce_los_valores_reales_y_enseña_lo_enviado(quiet):
@@ -212,9 +226,9 @@ def test_sin_modelo_preguntar_y_aprobar_se_explican(tmp_path, monkeypatch):
     client = Client()
     create_project(client, inbox)
     assert Project.open("analisis-1").status("analisis-1--three-months")["steps"]["triage"]["status"] == "skipped"
-    for url, data in ((CASE + "preguntar/", {"question": "hola"}), (CASE + "decidir/", {"decision": "approve", "note": "x"})):
-        r = client.post(url, data)
-        assert r.status_code == 409 and "modelo" in r.content.decode()
+    r = client.post(CASE + "preguntar/", {"question": "hola"})
+    assert r.status_code == 409 and "modelo" in r.content.decode()
+    assert "No hay ninguna propuesta pendiente" in client.post(CASE + "decidir/", {"x": "y"}).content.decode()
     assert "disabled" in client.get(CASE + "tab/preguntar/").content.decode()          # el botón está deshabilitado
     assert client.get(CASE + "tab/resumen/").status_code == 200                          # y el resto sigue funcionando
 
@@ -510,3 +524,23 @@ def test_un_hilo_roto_muestra_el_error_y_se_puede_reiniciar_sin_perder_nada(env,
     before = len(ws.ledger(ws.engine()).entries())
     assert "Conversación reiniciada" in client.post(CASE + "reiniciar/").content.decode()
     assert len(ws.ledger(ws.engine()).entries()) == before and ws.verify().ok              # el ledger no se toca
+
+
+# --- pestaña Datos (perfil de ingeniero de datos) -----------------------------------------------------------------------------
+
+def test_la_pestana_datos_muestra_el_desglose_en_alias_y_reales_solo_con_el_interruptor(quiet):
+    client, _, _ = quiet
+    page = client.get(CASE + "tab/datos/").content.decode()
+    assert "Eventos por hora" in page and "Calidad del dato" in page and "Campos" in page and "U-00" in page
+    assert "atacante" not in page and "66.6.6." not in page
+    real = client.get(CASE + "tab/datos/?reveal=1").content.decode()
+    assert "atacante" in real or "66.6.6." in real
+
+
+def test_un_caso_sin_perfil_ofrece_calcularlo(quiet):
+    client, _, _ = quiet
+    ws = Project.open("analisis-1").workspace("analisis-1--three-months")
+    (ws.dir / "p1" / "perfil_datos.json").unlink()
+    assert "Calcular el perfil" in client.get(CASE + "tab/datos/").content.decode()
+    done = client.post(CASE + "perfil/").content.decode()
+    assert "Perfil calculado" in done and "Eventos por hora" in done and ws.verify().ok

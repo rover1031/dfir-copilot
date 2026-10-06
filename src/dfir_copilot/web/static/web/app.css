@@ -36,3 +36,6 @@ pre, code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:1
 .drop input { display:block; margin:0 auto 8px; } progress { width:100%; height:10px; }
 .chip-kind-log { color:var(--ok); border-color:#abefc6; } .chip-kind-excel { color:#027a48; border-color:#a6f4c5; background:#f6fef9; }
 .chip-kind-document { color:#6941c6; border-color:#d9d6fe; background:#f4f3ff; } details summary { cursor:pointer; margin:6px 0; }
+.bars { display:flex; align-items:flex-end; gap:1px; height:110px; border-bottom:1px solid var(--line); margin:6px 0; }
+.bars .bar { flex:1; background:var(--accent); opacity:.75; min-height:1px; position:relative; } .bars .bar:hover { opacity:1; }
+.bars.hours .bar span { position:absolute; bottom:-16px; left:0; right:0; text-align:center; font-size:10px; color:var(--muted); } .bars.hours { margin-bottom:22px; }

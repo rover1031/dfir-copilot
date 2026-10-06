@@ -129,6 +129,7 @@ class AgentState(TypedDict):
     steps: int
     tokens: int
     cut: str | None   # por qué se cortó la investigación: "steps" | "tokens" | None
+    halt: bool  # tras decidir aprobaciones sin pedir que el agente continúe: el turno termina
 
 
 @dataclass(frozen=True)
@@ -338,7 +339,9 @@ class DfirAgent:
         def review_node(state: AgentState):
             # Nada con efectos antes de interrupt(): al reanudar, este nodo se vuelve a ejecutar desde el inicio.
             requests = [self._approval_view(p) for p in state["pending"]]
-            decisions = interrupt({"type": "approval_required", "requests": requests})
+            answer = interrupt({"type": "approval_required", "requests": requests})
+            # Reanudación: {"decisions": [...], "continue": bool} (o una lista, formato anterior: continúa siempre)
+            decisions, cont = (answer.get("decisions", []), answer.get("continue", True)) if isinstance(answer, dict) else (answer, True)
             by_id = {d["hypothesis_id"]: d for d in (decisions or [])}
             out, done = [], set()
             for p in state["pending"]:
@@ -357,7 +360,11 @@ class DfirAgent:
                         result = {"ok": False, "error": str(exc)}
                 out.append(ToolMessage(content=render({"tool": "update_hypothesis", **result}),
                                        tool_call_id=p["tool_call_id"], name="update_hypothesis"))
-            return {"messages": out, "pending": []}
+            return {"messages": out, "pending": [], "halt": not cont}
+
+        def after_review(state: AgentState):
+            # Sin "continuar", el turno termina aquí: las decisiones quedan registradas y no se vuelve a llamar al modelo
+            return END if state.get("halt") else "agent"
 
         g = StateGraph(AgentState)
         g.add_node("agent", agent_node)
@@ -366,7 +373,7 @@ class DfirAgent:
         g.add_edge(START, "agent")
         g.add_conditional_edges("agent", after_agent, {"tools": "tools", END: END})
         g.add_conditional_edges("tools", after_tools, {"review": "review", "agent": "agent"})
-        g.add_edge("review", "agent")
+        g.add_conditional_edges("review", after_review, {"agent": "agent", END: END})
         return g.compile(checkpointer=self._checkpointer)
 
     # --- herramientas de hipótesis ----------------------------------------------------------------
@@ -470,7 +477,7 @@ class DfirAgent:
         self._check_thread(thread_id)
         self._seen_tokens[thread_id] = 0
         first = HumanMessage(f"{self.briefing()}\n\nPREGUNTA DEL ANALISTA:\n{clean.text}")
-        result = self._run({"messages": [first], "steps": 0, "tokens": 0, "pending": [], "cut": None}, thread_id, clean.text,
+        result = self._run({"messages": [first], "steps": 0, "tokens": 0, "pending": [], "cut": None, "halt": False}, thread_id, clean.text,
                            self._audit_text(clean))
         return replace(result, sent=clean.text, substitutions=clean.substitutions)
 
@@ -518,23 +525,38 @@ class DfirAgent:
         return {"text_substitutions": sum(c["count"] for r in cleaned for c in r.substitutions),
                 "text_literal": sum(r.literal_used for r in cleaned)}
 
-    def resume(self, decisions: list[dict], thread_id: str = "default", literal=()) -> AgentResult:
-        """decisions: [{"hypothesis_id": "h-…", "decision": "approve"|"reject", "note": "…"}]
+    def resume(self, decisions: list[dict], thread_id: str = "default", literal=(), continue_agent: bool = True) -> AgentResult:
+        """decisions: [{"hypothesis_id": "h-…", "decision": "approve"|"reject", "note": "…"}], UNA por propuesta pendiente.
 
-        Las notas se traducen a alias antes de llegar al modelo y al registro de la decisión. Si alguna es ambigua se lanza
-        `AmbiguousText` ANTES de reanudar: la aprobación sigue pendiente y puedes reescribir la nota."""
-        if not self.pending(thread_id):
+        `continue_agent=False`: las decisiones se registran y el turno termina sin volver a llamar al modelo (instantáneo, sin tokens);
+        con True el agente sigue investigando tras conocerlas. Las notas se traducen a alias antes de llegar al modelo y al registro de
+        la decisión. Si alguna es ambigua, o falta la decisión de alguna propuesta, se lanza el error ANTES de reanudar: todo sigue
+        pendiente y puedes corregirlo."""
+        pending = self.pending(thread_id)
+        if not pending:
             raise ValueError("No hay ninguna aprobación pendiente en este hilo")
+        asked = {r["hypothesis_id"] for r in pending}
+        given = [d.get("hypothesis_id") for d in decisions]
+        missing, unknown = sorted(asked - set(given)), sorted(set(given) - asked)
+        if missing or unknown or len(given) != len(set(given)):
+            raise ValueError("Cada propuesta pendiente necesita exactamente una decisión"
+                             + (f"; falta: {', '.join(missing)}" if missing else "") + (f"; no están pendientes: {', '.join(unknown)}" if unknown else ""))
+        if any(d.get("decision") not in ("approve", "reject") for d in decisions):
+            raise ValueError("Cada decisión debe ser 'approve' o 'reject'")
         self._check_thread(thread_id)
         cleaned = [self.preview(d.get("note") or "", literal) for d in decisions]
         decisions = [{**d, "note": c.text} for d, c in zip(decisions, cleaned, strict=True)]
         sent = " | ".join(c.text for c in cleaned if c.text) or None
-        result = self._run(Command(resume=decisions), thread_id, None, self._audit_text(*cleaned))
+        summary = ("Decisiones registradas sin reanudar al agente (no gastó tokens): "
+                   + "; ".join(f"{d['hypothesis_id']} {'aprobada' if d['decision'] == 'approve' else 'rechazada'}" for d in decisions)
+                   + ". Pregunta cuando quieras que siga.")
+        result = self._run(Command(resume={"decisions": decisions, "continue": continue_agent}), thread_id, None,
+                           {**self._audit_text(*cleaned), "halt_summary": None if continue_agent else summary})
         return replace(result, sent=sent, substitutions=tuple(x for c in cleaned for x in c.substitutions))
 
     def resolve(self, decision: Literal["approve", "reject"], note: str = "", thread_id: str = "default",
                 literal=()) -> AgentResult:
-        """Atajo: aplica la misma decisión a todas las aprobaciones pendientes."""
+        """Atajo de la API: aplica la MISMA decisión a todas las aprobaciones pendientes (la interfaz decide una por una)."""
         pending = self.pending(thread_id)
         return self.resume([{"hypothesis_id": r["hypothesis_id"], "decision": decision, "note": note} for r in pending],
                            thread_id, literal)
@@ -601,7 +623,11 @@ class DfirAgent:
         approvals = self.pending(thread_id)
         status = "needs_approval" if (snap.next and approvals) else "done"
         answer, stop = None, None
-        if status == "done":
+        extra = dict(extra or {})
+        halt_summary = extra.pop("halt_summary", None)
+        if status == "done" and values.get("halt") and halt_summary:
+            answer = halt_summary
+        elif status == "done":
             last = values["messages"][-1]
             if isinstance(last, AIMessage):
                 answer = _text(last.content).strip() or "(el modelo no devolvió texto)"

@@ -1,4 +1,6 @@
 {% if flash %}<div class="msg {{ flash.0 }}">{{ flash.1 }}</div>{% endif %}
+{% if pending %}<form hx-post="{{ base }}decidir/" hx-target="#tab" hx-swap="innerHTML">{% csrf_token %}<input type="hidden" name="reveal" value="{% if reveal %}1{% else %}0{% endif %}">
+<div class="msg info">El agente dejó {{ pending|length }} propuesta(s). <strong>Decide cada una por separado</strong> y pulsa «Registrar decisiones».</div>
 {% for r in pending %}
 <div class="card" style="border-color:#fedf89"><h3>⏳ Esperando tu decisión · <code>{{ r.hypothesis_id }}</code> <span class="badge">{{ r.estado_actual }} → {{ r.estado_solicitado }}</span></h3>
 <p><strong>Hipótesis:</strong> {{ r.hipotesis }}</p>
@@ -8,11 +10,13 @@
 <div class="card"><code>{{ a.ref }}</code><pre>{{ a.detalle }}</pre><small><strong>La habría refutado si:</strong> {{ a.habria_refutado_si }}<br><strong>Observado:</strong> {{ a.observado }}</small></div>{% endfor %}
 <p class="hint">Pregúntate: ¿esa consulta <em>podía</em> haber salido distinto? Si solo repite lo que ya apoyaba la hipótesis, rechaza y dilo en la nota.</p>{% endif %}
 {% if r.evidencia %}<details><summary>Evidencia citada ({{ r.evidencia|length }})</summary>{% for e in r.evidencia %}<p><code>{{ e.ref }}</code> {{ e.tipo }}: <small>{{ e.detalle }}</small></p>{% endfor %}</details>{% endif %}
-<form hx-post="{{ base }}decidir/" hx-target="#job-area" hx-swap="innerHTML">{% csrf_token %}<input type="hidden" name="reveal" value="{% if reveal %}1{% else %}0{% endif %}">
-<label>Tu nota <small>(queda en el ledger y la verá el modelo; los valores reales se traducen a alias solos)</small></label><textarea name="note" required></textarea>
-<p class="row"><button name="decision" value="approve" {% if not model_ok %}disabled{% endif %}>Aprobar</button><button class="danger" name="decision" value="reject" {% if not model_ok %}disabled{% endif %}>Rechazar</button>
-{% if not model_ok %}<small class="muted">Reanudar al agente necesita el modelo: configura la clave de API.</small>{% endif %}</p></form></div>
+<p class="row"><label class="inline"><input type="radio" name="decision_{{ r.hypothesis_id }}" value="approve" required> Aprobar</label>
+<label class="inline"><input type="radio" name="decision_{{ r.hypothesis_id }}" value="reject"> Rechazar</label></p>
+<label>Tu nota sobre esta propuesta <small>(queda en el ledger; los valores reales se traducen a alias solos)</small></label><textarea name="note_{{ r.hypothesis_id }}" required></textarea></div>
 {% endfor %}
+<div class="card"><label class="inline"><input type="checkbox" name="continue" {% if not model_ok %}disabled{% endif %}> Que el agente siga investigando con mis decisiones (más lento y gasta tokens)</label>
+<p class="hint">Sin marcar, tus decisiones se registran al instante y sin llamar al modelo; luego puedes preguntarle lo que quieras.</p>
+<p class="row"><button class="big" type="submit">Registrar decisiones</button><span class="spin">registrando…</span></p></div></form>{% endif %}
 <div class="card"><h3>Hipótesis del caso ({{ items|length }})</h3>
 {% for h in items %}<div style="padding:8px 0;border-bottom:1px solid var(--line)"><span class="badge {{ h.status }}">{{ h.status }}</span> <code>{{ h.id }}</code>{% if h.superseded_by %} <small class="muted">→ reemplazada por {{ h.superseded_by }}</small>{% endif %}
 {% if h.status != "retirada" %}<p>{{ h.statement }}</p>{% if h.falsifier %}<small><strong>Refutaría:</strong> {{ h.falsifier }}</small>{% else %}<small class="muted">Sin criterio de refutación (formulada antes de existir ese requisito).</small>{% endif %}

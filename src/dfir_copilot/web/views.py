@@ -17,7 +17,7 @@ from dfir_copilot.reporting import ReportError, export_report, reports_root
 from dfir_copilot.timezone_status import BASES, TimezoneError, confirm_timezone, timezone_state
 from dfir_copilot.web.services import Busy, NotFound, get_services
 
-TABS = ("resumen", "hipotesis", "preguntar", "notas", "informe", "integridad")
+TABS = ("resumen", "datos", "hipotesis", "preguntar", "notas", "informe", "integridad")
 _FILENAME = re.compile(r"^informe\.(es|en)\.(interno|compartible)\.md$")
 _SEV = {"high": 0, "medium": 1, "low": 2, "info": 3}
 
@@ -206,6 +206,24 @@ def _tab_hipotesis(ctx, b, reveal):
     return {"items": items, "pending": [_approval(r, v) for r in b.agent.pending()], "model_ok": b.model_ok}
 
 
+def _tab_datos(ctx, b, reveal):
+    """El perfil de datos (en alias; con el interruptor, valores reales solo en pantalla)."""
+    path = ctx.ws.dir / "p1" / "perfil_datos.json"
+    if not path.exists():
+        return {"profile": None}
+    prof = json.loads(path.read_text(encoding="utf-8"))
+    v = _shower(b, reveal)
+    for c in prof["columns"]:
+        c["top"] = [[v(x), n] for x, n in c.get("top", [])]
+    t = prof.get("time")
+    if t:
+        top_day = max((n for _, n in t["per_day"]), default=0) or 1
+        t["days"] = [{"d": d, "n": n, "pct": round(100 * n / top_day, 1)} for d, n in t["per_day"]]
+        top_hour = max(t["per_hour"]) or 1
+        t["hours"] = [{"h": h, "n": n, "pct": round(100 * n / top_hour, 1)} for h, n in enumerate(t["per_hour"])]
+    return {"profile": prof}
+
+
 def _auto_running(ctx) -> bool:
     """¿El análisis automático (con su triaje) sigue corriendo para este caso? Mientras tanto no se pregunta ni se decide: serían
     dos agentes sobre la misma conversación."""
@@ -250,7 +268,7 @@ def _tab_integridad(ctx, b, reveal):
             "ok": report.ok, "summary": s, "copies": b.ledger.copies(), "budget": b.agent.budget()}
 
 
-_TAB_BUILDERS = {"resumen": _tab_resumen, "hipotesis": _tab_hipotesis, "preguntar": _tab_preguntar, "notas": _tab_notas,
+_TAB_BUILDERS = {"resumen": _tab_resumen, "datos": _tab_datos, "hipotesis": _tab_hipotesis, "preguntar": _tab_preguntar, "notas": _tab_notas,
                  "informe": _tab_informe, "integridad": _tab_integridad}
 
 
@@ -325,27 +343,46 @@ def ask(request, pid, cid):
 
 @require_POST
 def decide(request, pid, cid):
+    """Una decisión y una nota por propuesta pendiente. Sin «continuar», se registran al instante sin llamar al modelo."""
     ctx = _ctx(pid, cid)
     b = _bundle(ctx)
-    decision, note = request.POST.get("decision"), (request.POST.get("note") or "").strip()
-    if decision not in ("approve", "reject"):
-        return _msg(request, "Decisión no válida.", status=400)
     if _auto_running(ctx):
         return _msg(request, _RUNNING_MSG, status=409)
-    if not b.model_ok:
-        return _msg(request, "Aprobar o rechazar reanuda al agente, que necesita el modelo: configura la clave de API.", status=409)
-    if not b.agent.pending():
-        return _msg(request, "No hay ninguna aprobación pendiente.", status=409)
+    pending = b.agent.pending()
+    if not pending:
+        return _render_tab(request, ctx, "hipotesis", ("error", "No hay ninguna propuesta pendiente."))
+    decisions = []
+    for r in pending:
+        hid = r["hypothesis_id"]
+        decision, note = request.POST.get(f"decision_{hid}"), (request.POST.get(f"note_{hid}") or "").strip()
+        if decision not in ("approve", "reject"):
+            return _render_tab(request, ctx, "hipotesis", ("error", f"Falta tu decisión sobre {hid}: aprueba o rechaza cada propuesta."))
+        decisions.append({"hypothesis_id": hid, "decision": decision, "note": note})
+    cont = request.POST.get("continue") == "on"
+    if cont and not b.model_ok:
+        return _render_tab(request, ctx, "hipotesis", ("error", "Que el agente siga necesita el modelo: configura la clave de API "
+                                                                 "o registra las decisiones sin marcar «continuar»."))
     literal = _literals(request)
     try:
-        b.agent.preview(note, literal)
+        for d in decisions:
+            b.agent.preview(d["note"], literal)
     except AmbiguousText as exc:
-        return _msg(request, str(exc), status=422)
+        return _render_tab(request, ctx, "hipotesis", ("error", str(exc)))
+    if cont:
+        try:
+            job = get_services().submit(b, "decide", lambda: _result(b.agent.resume(decisions, literal=literal, continue_agent=True)))
+        except Busy as exc:
+            return _msg(request, str(exc), status=409)
+        return _job_response(request, ctx, job)
+    if not b.lock.acquire(blocking=False):
+        return _render_tab(request, ctx, "hipotesis", ("error", "Ya hay una operación con el modelo en curso en este caso."))
     try:
-        job = get_services().submit(b, "decide", lambda: _result(b.agent.resolve(decision, note, literal=literal)))
-    except Busy as exc:
-        return _msg(request, str(exc), status=409)
-    return _job_response(request, ctx, job)
+        result = b.agent.resume(decisions, literal=literal, continue_agent=False)
+    except ValueError as exc:
+        return _render_tab(request, ctx, "hipotesis", ("error", str(exc)))
+    finally:
+        b.lock.release()
+    return _render_tab(request, ctx, "hipotesis", ("ok", result.answer))
 
 
 @require_GET
@@ -579,3 +616,19 @@ def reset_conversation(request, pid, cid):
         return _render_tab(request, ctx, "preguntar", ("error", _RUNNING_MSG))
     b.agent.reset()
     return _render_tab(request, ctx, "preguntar", ("ok", "Conversación reiniciada. Las hipótesis, las notas y el ledger siguen intactos."))
+
+
+@require_POST
+def compute_profile(request, pid, cid):
+    """Calcula el perfil de un caso que no lo tiene (p. ej. uno anterior a esta etapa). Local, sin modelo."""
+    from dfir_copilot.data_profile import build_profile, save_profile
+
+    ctx = _ctx(pid, cid)
+    b = _bundle(ctx)
+    path = ctx.ws.dir / "p1" / "perfil_datos.json"
+    if not path.exists():
+        prof = build_profile(b.pseudo)
+        sha = save_profile(prof, path)
+        b.ledger.append("data_profile", {"file": "p1/perfil_datos.json", "sha256": sha, "rows": prof["rows"],
+                                         "columns": len(prof["columns"]), "copy": b.pseudo.copy_id})
+    return _render_tab(request, ctx, "datos", ("ok", "Perfil calculado sobre el dataset completo (local, sin modelo)."))
