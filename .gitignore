@@ -9,3 +9,4 @@ __pycache__/
 .ruff_cache/
 *.zip
 *:Zone.Identifier
+reports/diagnostico-*.md

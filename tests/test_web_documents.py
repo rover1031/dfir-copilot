@@ -129,6 +129,109 @@ def test_hashes_de_ocr_se_ven_aparte_y_se_verifican_pegando_la_fuente(project, t
     assert V.document_state(project, src)["state"] == "done"
 
 
+# --- PDF-b.2: chat con el documento ---------------------------------------------------------------------------------------------
+from test_document_chat import FakeChat, call, say  # noqa: E402
+
+
+@pytest.fixture
+def install_model(monkeypatch):
+    def install(script, cls=FakeChat):
+        llm = cls(script)
+        monkeypatch.setattr(V, "_model", lambda: (llm, "ok"))
+        monkeypatch.setattr(V, "_model_available", lambda: True)
+        return llm
+    return install
+
+
+def _ready(project, tmp_path):
+    return _add(project, "boletin.pdf", _text_pdf(tmp_path).read_bytes())
+
+
+def _allow(project, src, value="1"):
+    return Client().post(_url(project, src, "modelo/"), {"permitir": value})
+
+
+GOOD = [call("buscar_en_documento", {"consulta": "backup services encryption"}),
+        say("Deshabilitaron los backups: «Attackers disabled backup services before encryption» (p.1).")]
+
+
+def test_por_defecto_nada_sale_hacia_el_modelo(project, tmp_path, install_model):
+    src = _ready(project, tmp_path)
+    llm = install_model(list(GOOD))
+    html = Client().get(_url(project, src)).content.decode()
+    assert "Permitir enviar pasajes al modelo para este documento" in html and 'name="question"' not in html
+    r = Client().post(_url(project, src, "preguntar/"), {"question": "¿backups?"})
+    assert r.status_code == 409 and "no tiene permitido" in r.content.decode()
+    assert llm.seen == [] and C_read(project, src) == []
+
+
+def C_read(project, src):
+    from dfir_copilot.documents import chat as C
+
+    return C.read_turns(V.doc_dir(project, src))
+
+
+def test_permitir_preguntar_ver_lo_enviado_y_conservar_la_conversacion(project, tmp_path, install_model):
+    src = _ready(project, tmp_path)
+    llm = install_model(GOOD + [say("Segunda respuesta.")])
+    assert 'name="question"' in _allow(project, src).content.decode()
+    r = Client().post(_url(project, src, "preguntar/"), {"question": "¿Qué hicieron con los backups?"})
+    html = r.content.decode()
+    assert r.status_code == 200 and "Deshabilitaron los backups" in html and "✔ 1 cita(s) verificada(s)" in html
+    assert "Salió hacia el modelo: buscar_en_documento (p.1)" in html and "⚠" not in html
+    turns = C_read(project, src)
+    assert len(turns) == 1 and turns[0]["verified"] == 1 and turns[0]["sent"][0]["pages"] == [1]
+    Client().post(_url(project, src, "preguntar/"), {"question": "¿y qué más?"})
+    assert any("¿Qué hicieron con los backups?" in getattr(m, "content", "") for m in llm.seen[-1])    # el historial se reenvía
+    assert "Segunda respuesta" in Client().get(_url(project, src)).content.decode()
+
+
+def test_una_cita_inventada_se_ve_marcada_y_con_aviso(project, tmp_path, install_model):
+    src = _ready(project, tmp_path)
+    install_model([call("ver_pagina", {"pagina": 1}), say("Usaron vssadmin «they deleted every shadow copy with vssadmin» (p.1).")])
+    _allow(project, src)
+    html = Client().post(_url(project, src, "preguntar/"), {"question": "¿shadow copies?"}).content.decode()
+    assert "⚠ cita no verificada" in html and "NO existe en la página indicada" in html and "1 cita(s) NO verificada(s)" in html
+
+
+def test_sin_modelo_configurado_lo_dice(project, tmp_path, monkeypatch):
+    src = _ready(project, tmp_path)
+    monkeypatch.setattr(V, "_model", lambda: (None, "No hay un modelo configurado: define la clave de API en el .env y reinicia la interfaz."))
+    monkeypatch.setattr(V, "_model_available", lambda: False)
+    _allow(project, src)
+    r = Client().post(_url(project, src, "preguntar/"), {"question": "hola"})
+    assert r.status_code == 409 and "No hay un modelo configurado" in r.content.decode() and C_read(project, src) == []
+
+
+def test_un_error_del_modelo_no_tumba_nada_y_no_deja_la_pregunta_bloqueada(project, tmp_path, install_model):
+    src = _ready(project, tmp_path)
+
+    class Boom(FakeChat):
+        def invoke(self, messages, *a, **k):
+            raise RuntimeError("sin red")
+
+    install_model([], cls=Boom)
+    _allow(project, src)
+    r = Client().post(_url(project, src, "preguntar/"), {"question": "hola"})
+    assert r.status_code == 502 and "No se pudo responder: RuntimeError: sin red" in r.content.decode() and C_read(project, src) == []
+    install_model(list(GOOD))
+    assert Client().post(_url(project, src, "preguntar/"), {"question": "otra vez"}).status_code == 200    # el candado se liberó
+
+
+def test_validaciones_de_la_pregunta_y_revocar_el_permiso(project, tmp_path, install_model):
+    src = _ready(project, tmp_path)
+    llm = install_model(list(GOOD))
+    _allow(project, src)
+    assert Client().post(_url(project, src, "preguntar/"), {"question": "  "}).status_code == 400
+    assert Client().post(_url(project, src, "preguntar/"), {"question": "x" * (V.MAX_QUESTION_CHARS + 1)}).status_code == 400
+    D.write_state(V.doc_dir(project, src), "running")
+    assert Client().post(_url(project, src, "preguntar/"), {"question": "hola"}).status_code == 400
+    D.write_state(V.doc_dir(project, src), "done")
+    _allow(project, src, "0")
+    assert Client().post(_url(project, src, "preguntar/"), {"question": "hola"}).status_code == 409
+    assert llm.seen == [] and "Ya no se envía nada" in _allow(project, src, "0").content.decode()
+
+
 # --- integración con las vistas reales de evidencia (solo existen en el proyecto, no en el arnés) --------------------------------------
 W = pytest.importorskip("dfir_copilot.web.views")
 

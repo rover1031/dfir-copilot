@@ -23,6 +23,21 @@
 {% if summary.resumen_extractivo %}<div class="card"><h3>Resumen extractivo</h3>
 <p class="hint">Frases centrales del documento, en su orden y con su página. Lo calcula el código, sin modelo.</p>
 <ul>{% for page, sentence in summary.resumen_extractivo %}<li><strong>p.{{ page }}</strong> {{ sentence }}</li>{% endfor %}</ul></div>{% endif %}
+<div class="card"><h3>Preguntar al documento</h3>
+{% if not chat_allowed %}<p class="hint">El modelo <strong>no recibe el documento</strong>: solo los pasajes que cada pregunta necesite, y verás cuáles y cuántos caracteres. Mientras no lo permitas, nada de este documento sale de tu equipo; las estadísticas, los IOCs, los países y el resumen extractivo funcionan sin modelo.</p>
+<form hx-post="{{ base }}modelo/" hx-target="#doc" hx-swap="outerHTML">{% csrf_token %}<input type="hidden" name="permitir" value="1"><button class="btn" type="submit">Permitir enviar pasajes al modelo para este documento</button></form>
+{% else %}<p class="hint">Cada respuesta cita el documento («texto» (p.N)) y el código comprueba cada cita. Solo salen hacia el modelo los pasajes que la pregunta necesita; abajo ves cuáles.</p>
+<form hx-post="{{ base }}preguntar/" hx-target="#doc" hx-swap="outerHTML">{% csrf_token %}
+<textarea name="question" rows="3" style="width:100%" required placeholder="¿Cómo obtuvieron el acceso inicial? ¿Qué hicieron con los backups? ¿Qué IOCs conviene bloquear primero?"></textarea>
+<p class="row"><button class="btn" type="submit" {% if not model_ok %}disabled{% endif %}>Preguntar</button><span class="spin">consultando el documento…</span>
+{% if not model_ok %}<small class="muted">No hay un modelo configurado: define la clave de API en el .env y reinicia la interfaz.</small>{% endif %}</p></form>
+{% for t in chat_turns %}<div style="padding:8px 0;border-top:1px solid var(--line)"><small class="muted">{{ t.ts_utc }} · {{ t.tokens }} tokens · {{ t.model }}{% if t.analyst %} · {{ t.analyst }}{% endif %}</small>
+<p><strong>Tú:</strong> {{ t.question }}</p><div class="answer">{{ t.answer|linebreaksbr }}</div>
+<p class="hint">{% if t.status == "ok" %}✔ {{ t.verified }} cita(s) verificada(s){% elif t.status == "sin_citas" %}⚠ sin citas: no verificable{% elif t.status == "citas_no_verificadas" %}⚠ {{ t.unverified }} cita(s) NO verificada(s), {{ t.verified }} verificada(s){% else %}{{ t.status }}{% endif %}
+{% if t.sent %} · Salió hacia el modelo: {% for s in t.sent %}{{ s.tool }}{% if s.pages %} (p.{{ s.pages|join:"," }}){% endif %} {{ s.chars }} car.{% if not forloop.last %}; {% endif %}{% endfor %}{% else %} · no se envió contenido del documento{% endif %}</p></div>
+{% empty %}<p class="muted">Todavía no hay preguntas sobre este documento.</p>{% endfor %}
+<form hx-post="{{ base }}modelo/" hx-target="#doc" hx-swap="outerHTML" style="margin-top:8px">{% csrf_token %}<input type="hidden" name="permitir" value="0"><button class="danger" type="submit">Dejar de permitir el envío al modelo</button></form>
+{% endif %}</div>
 <div class="card"><h3>IOCs para controles ({{ n_blocklist }})</h3>
 <p class="hint">Sin IPs privadas, sin servicios conocidos y sin hashes leídos por OCR que no estén verificados. Revísalos antes de cargarlos como lista de bloqueo.</p>
 {% if blocklist %}<table><tr><th>Tipo</th><th>Valor</th><th>Menciones</th><th>Páginas</th><th>Etiquetas</th></tr>

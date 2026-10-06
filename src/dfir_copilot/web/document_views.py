@@ -6,11 +6,14 @@
 * Verificar un hash leído por OCR contra una fuente de texto es rápido (no repite el OCR) y se hace en la misma petición."""
 from __future__ import annotations
 
+import threading
+
 from django.http import FileResponse, Http404
 from django.shortcuts import render
 from django.urls import path
 from django.views.decorators.http import require_GET, require_POST
 
+from dfir_copilot.documents import chat as C
 from dfir_copilot.documents import iocs as I
 from dfir_copilot.documents import service as D
 from dfir_copilot.projects import ProjectError
@@ -34,6 +37,49 @@ def _geo():
         return geo_db()
     except Exception:  # noqa: BLE001
         return None
+
+
+MAX_QUESTION_CHARS = 2000
+DEFAULT_TOKEN_CAP = 60000
+STATUS_NOTE = {"sin_citas": "La respuesta consultó el documento pero no cita nada: no se puede verificar.",
+               "citas_no_verificadas": "Alguna cita NO existe en la página indicada (marcada ⚠): no te fíes de esa parte.",
+               "tope_de_tokens": "Se alcanzó el tope de tokens de la pregunta.",
+               "pasos_agotados": "La pregunta necesitó más pasos de los permitidos: acótala."}
+_LOCKS: dict[str, threading.Lock] = {}
+
+
+def _model_available() -> bool:
+    """¿Hay modelo configurado? (barato: no crea el cliente)."""
+    try:
+        return bool(get_services().model_status()[0])
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _model():
+    """(modelo, mensaje): el cliente del agente, o None con el motivo."""
+    sv = get_services()
+    try:
+        ok, msg = sv.model_status()
+        if not ok:
+            return None, "No hay un modelo configurado: define la clave de API en el .env y reinicia la interfaz."
+        return sv.deps.agent_llm(), msg
+    except Exception as exc:  # noqa: BLE001 - clave inválida, red, etc.: se muestra, no se propaga
+        return None, f"{type(exc).__name__}: {exc}"
+
+
+def _analyst(project) -> str | None:
+    try:
+        return project.settings.analyst
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _token_cap(project) -> int:
+    try:
+        return min(int(project.settings.max_tokens), DEFAULT_TOKEN_CAP)
+    except Exception:  # noqa: BLE001
+        return DEFAULT_TOKEN_CAP
 
 
 def doc_dir(project, source):
@@ -90,7 +136,8 @@ def _context(project, source, flash: tuple | None = None) -> dict:
                    by_kind=[(KIND_LABEL.get(k, k), n) for k, n in stats["unicos_por_tipo"].items()],
                    blocklist=blocklist[:ROW_LIMIT], n_blocklist=len(blocklist), candidates=I.candidate_rows(ex)[:ROW_LIMIT],
                    doubtful=ex.doubtful[:ROW_LIMIT], n_doubtful=len(ex.doubtful), countries=summary["paises"],
-                   reference=manifest.get("reference"), verification=summary.get("verificacion"))
+                   reference=manifest.get("reference"), verification=summary.get("verificacion"),
+                   chat_allowed=C.model_access(d)["allowed"], chat_turns=C.read_turns(d)[-8:], model_ok=_model_available())
     return ctx
 
 
@@ -137,6 +184,48 @@ def document_reanalyze(request, pid, cid):
     return _render(request, project, source)
 
 
+@require_POST
+def document_model_access(request, pid, cid):
+    """Permitir o dejar de permitir que pasajes de ESTE documento salgan hacia el modelo. Apagado por defecto."""
+    project, source = _doc(pid, cid)
+    allowed = request.POST.get("permitir") == "1"
+    C.set_model_access(doc_dir(project, source), allowed, by=_analyst(project))
+    msg = ("Permitido: el modelo recibirá solo los pasajes que cada pregunta necesite, y verás cuáles." if allowed
+           else "Ya no se envía nada de este documento al modelo.")
+    return _render(request, project, source, ("ok" if allowed else "info", msg))
+
+
+@require_POST
+def document_ask(request, pid, cid):
+    project, source = _doc(pid, cid)
+    d = doc_dir(project, source)
+    question = (request.POST.get("question") or "").strip()
+    if not question:
+        return _render(request, project, source, ("error", "Escribe una pregunta."), 400)
+    if len(question) > MAX_QUESTION_CHARS:
+        return _render(request, project, source, ("error", f"La pregunta es demasiado larga (máximo {MAX_QUESTION_CHARS} caracteres)."), 400)
+    if document_state(project, source).get("state") not in ("done", "needs_attention"):
+        return _render(request, project, source, ("error", "El análisis del documento aún no terminó."), 400)
+    if not C.model_access(d)["allowed"]:
+        return _render(request, project, source, ("error", "Este documento no tiene permitido enviar pasajes al modelo: actívalo en «Preguntar al documento»."), 409)
+    llm, note = _model()
+    if llm is None:
+        return _render(request, project, source, ("error", note), 409)
+    lock = _LOCKS.setdefault(str(d), threading.Lock())
+    if not lock.acquire(blocking=False):
+        return _render(request, project, source, ("error", "Ya hay una pregunta en curso sobre este documento."), 409)
+    try:
+        data = D.load(d)
+        chat = C.DocumentChat(data["pages"], data["extraction"], data["summary"], llm, geo=_geo(), max_tokens=_token_cap(project))
+        turn = chat.ask(question, history=C.history_for_model(d))
+        C.append_turn(d, turn.record(analyst=_analyst(project)))
+    except Exception as exc:  # noqa: BLE001 - error del modelo, de red o de lectura: se muestra y no tumba el servidor
+        return _render(request, project, source, ("error", f"No se pudo responder: {type(exc).__name__}: {exc}"), 502)
+    finally:
+        lock.release()
+    return _render(request, project, source, ("info", STATUS_NOTE[turn.status]) if turn.status in STATUS_NOTE else None)
+
+
 @require_GET
 def document_download(request, pid, cid, filename):
     project, source = _doc(pid, cid)
@@ -154,4 +243,6 @@ urlpatterns = [
     path("proyectos/<str:pid>/documentos/<str:cid>/verificar/", document_verify, name="document_verify"),
     path("proyectos/<str:pid>/documentos/<str:cid>/reanalizar/", document_reanalyze, name="document_reanalyze"),
     path("proyectos/<str:pid>/documentos/<str:cid>/descargar/<str:filename>/", document_download, name="document_download"),
+    path("proyectos/<str:pid>/documentos/<str:cid>/modelo/", document_model_access, name="document_model_access"),
+    path("proyectos/<str:pid>/documentos/<str:cid>/preguntar/", document_ask, name="document_ask"),
 ]
